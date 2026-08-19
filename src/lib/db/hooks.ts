@@ -419,6 +419,22 @@ export function useAllSubjects(filter?: { standard?: string }) {
   });
 }
 
+export function useStudentPayments(studentId: string | undefined, filter?: { status?: string }) {
+  return useQuery({
+    queryKey: ["student-payments", studentId, filter],
+    queryFn: () =>
+      studentId ? paymentService.listByStudent(studentId, filter) : Promise.resolve([]),
+    enabled: !!studentId,
+  });
+}
+
+export function useAdminRevenueSummary() {
+  return useQuery({
+    queryKey: ["admin-revenue-summary"],
+    queryFn: () => paymentService.getAdminRevenueSummary(),
+  });
+}
+
 export function useAllPayments(filter?: { status?: string }) {
   return useQuery({
     queryKey: ["admin-payments", filter],

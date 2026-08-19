@@ -13,7 +13,7 @@ export const enrollmentService = {
   async getById(id: string): Promise<Enrollment | null> {
     const { data, error } = await supabase
       .from("enrollments")
-      .select("*, student:students(*), subject:subjects(*)")
+      .select("*, student:students(*, user:users(*)), subject:subjects(*), payment:payments(*)")
       .eq("id", id)
       .single();
 
@@ -31,9 +31,9 @@ export const enrollmentService = {
   async listAll(filter?: { status?: string }): Promise<Enrollment[]> {
     let query = supabase
       .from("enrollments")
-      .select("*, student:students(*, user:users(*)), subject:subjects(*)");
+      .select("*, student:students(*, user:users(*)), subject:subjects(*), payment:payments(*)");
 
-    if (filter?.status) {
+    if (filter?.status && filter.status !== "all") {
       query = query.eq("status", filter.status);
     }
 
@@ -48,7 +48,7 @@ export const enrollmentService = {
   },
 
   /**
-   * Check if student is enrolled in subject
+   * Check if student is actively enrolled in subject
    */
   async isEnrolled(studentId: string, subjectId: string): Promise<boolean> {
     const { count, error } = await supabase
@@ -82,7 +82,7 @@ export const enrollmentService = {
       return [];
     }
 
-    return data;
+    return data || [];
   },
 
   /**
@@ -101,7 +101,7 @@ export const enrollmentService = {
       return [];
     }
 
-    return data;
+    return data || [];
   },
 
   /**
@@ -110,8 +110,10 @@ export const enrollmentService = {
   async create(input: {
     student_id: string;
     subject_id: string;
-    status?: "active" | "expired" | "inactive";
+    status?: "active" | "expired" | "inactive" | "pending";
     expires_at?: string;
+    enrollment_type?: "paid" | "free" | "manual_admin" | "subscription" | string;
+    payment_id?: string;
   }): Promise<Enrollment> {
     // Check if already enrolled
     const existing = await this.isEnrolled(input.student_id, input.subject_id);
@@ -126,6 +128,7 @@ export const enrollmentService = {
         {
           ...input,
           status: input.status || "active",
+          enrollment_type: input.enrollment_type || "paid",
           enrolled_at: new Date().toISOString(),
         },
       ])
@@ -136,6 +139,42 @@ export const enrollmentService = {
 
     if (error) {
       throw new Error(`Failed to create enrollment: ${handleDatabaseError(error)}`);
+    }
+
+    return data;
+  },
+
+  /**
+   * Manual enrollment by Admin (audited with enrollment_type = 'manual_admin')
+   */
+  async adminManualEnroll(input: {
+    student_id: string;
+    subject_id: string;
+    duration_months?: number;
+  }): Promise<Enrollment> {
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + (input.duration_months || 6));
+
+    const { data, error } = await supabase
+      .from("enrollments")
+      .upsert(
+        [
+          {
+            student_id: input.student_id,
+            subject_id: input.subject_id,
+            status: "active",
+            enrolled_at: new Date().toISOString(),
+            expires_at: expiresAt.toISOString(),
+            enrollment_type: "manual_admin",
+          },
+        ],
+        { onConflict: "student_id,subject_id" },
+      )
+      .select("*, subject:subjects(*), student:students(*, user:users(*))")
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to manually enroll student: ${handleDatabaseError(error)}`);
     }
 
     return data;
@@ -165,7 +204,7 @@ export const enrollmentService = {
    * Deactivate an enrollment
    */
   async deactivate(id: string): Promise<Enrollment> {
-    return this.update(id, { status: "inactive" });
+    return this.update(id, { status: "inactive" as any });
   },
 
   /**
@@ -205,6 +244,7 @@ export const enrollmentService = {
       student_id: studentId,
       subject_id: subjectId,
       status: "active" as const,
+      enrollment_type: "manual_admin",
       enrolled_at: new Date().toISOString(),
     }));
 

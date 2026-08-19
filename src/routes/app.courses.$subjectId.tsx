@@ -171,7 +171,9 @@ function CourseDetail() {
 
             <aside className="lg:sticky lg:top-24 lg:self-start">
               <div className="surface p-5">
-                <p className="text-3xl font-semibold">{inr(subject.price_inr)}</p>
+                <p className="text-3xl font-semibold">
+                  {subject.price_inr === 0 ? "Free" : inr(subject.price_inr)}
+                </p>
                 <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
                   <Clock3 className="size-4" /> Valid for {subject.duration_months || 6} months
                 </p>
@@ -193,12 +195,16 @@ function CourseDetail() {
                 ) : (
                   <Button asChild className="mt-5 w-full" size="lg">
                     <Link to="/app/checkout/$subjectId" params={{ subjectId }}>
-                      Purchase course
+                      {subject.price_inr === 0
+                        ? "Enroll Now (Free)"
+                        : `Purchase for ${inr(subject.price_inr)}`}
                     </Link>
                   </Button>
                 )}
                 <p className="mt-3 text-center text-[11px] text-muted-foreground">
-                  One-time payment · Cancel anytime before you start
+                  {subject.price_inr === 0
+                    ? "Instant free access · No credit card required"
+                    : "One-time payment · 18% GST included at checkout"}
                 </p>
               </div>
             </aside>

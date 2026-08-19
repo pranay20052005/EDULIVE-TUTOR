@@ -104,6 +104,10 @@ export interface Enrollment {
   enrolled_at: string;
   status: EnrollmentStatus;
   expires_at?: string;
+  valid_until?: string;
+  enrollment_type?: "paid" | "free" | "manual_admin" | "subscription" | string;
+  payment_id?: string;
+  payment?: Payment;
   student?: Student;
   subject?: Subject;
   created_at: string;
@@ -393,15 +397,22 @@ export interface Payment {
   id: string;
   student_id: string;
   subject_id?: string;
+  plan_id?: string;
   amount_inr: number;
   currency: string;
   payment_method: "card" | "upi" | "wallet" | "bank_transfer" | "netbanking" | string;
+  provider?: string;
+  provider_order_id?: string;
+  provider_payment_id?: string;
+  provider_signature?: string;
+  transaction_id?: string;
   payment_id?: string; // External payment ID from gateway
-  status: "pending" | "paid" | "completed" | "failed" | "refunded";
+  status: "pending" | "paid" | "completed" | "failed" | "refunded" | "cancelled";
   paid_at?: string;
   refunded_at?: string;
   student?: Student;
   subject?: Subject;
+  plan?: SubscriptionPlan;
   created_at: string;
   updated_at?: string;
 }

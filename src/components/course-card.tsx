@@ -62,7 +62,7 @@ export function CourseCard({ subject, enrolled }: { subject: Subject; enrolled: 
 
       <div className="mt-4 flex items-end justify-between gap-3 border-t border-border pt-4">
         <div className="min-w-0">
-          <p className="text-xl font-semibold">{inr(price)}</p>
+          <p className="text-xl font-semibold">{price === 0 ? "Free" : inr(price)}</p>
           <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Clock3 className="size-3" /> Valid for {duration} months
           </p>
@@ -85,7 +85,7 @@ export function CourseCard({ subject, enrolled }: { subject: Subject; enrolled: 
             </Button>
             <Button asChild className="flex-1">
               <Link to="/app/checkout/$subjectId" params={{ subjectId: subject.id }}>
-                Purchase
+                {price === 0 ? "Enroll Free" : "Purchase"}
               </Link>
             </Button>
           </>
