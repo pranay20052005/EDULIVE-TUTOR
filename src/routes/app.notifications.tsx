@@ -1,14 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Bell, BookOpen, CreditCard, Radio, Trophy } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Bell, BookOpen, CheckCheck, CreditCard, Radio, Trophy } from "lucide-react";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { PageHeader } from "@/components/ui-kit";
+import { EmptyState, PageHeader } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
-import { relative } from "@/lib/format";
+import { notificationService } from "@/lib/db";
 import { useUserNotifications } from "@/lib/db/hooks";
+import { useNotificationRealtime } from "@/lib/db/realtime";
+import { relative } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
+import type { NotificationItem } from "@/lib/db/types";
 
 export const Route = createFileRoute("/app/notifications")({
   head: () => ({
@@ -25,52 +28,113 @@ export const Route = createFileRoute("/app/notifications")({
   component: NotificationsPage,
 });
 
-const icons = { class: Radio, content: BookOpen, test: Trophy, billing: CreditCard, general: Bell };
+const icons = {
+  class: Radio,
+  content: BookOpen,
+  test: Trophy,
+  billing: CreditCard,
+  general: Bell,
+};
 
 function NotificationsPage() {
   const { session } = useSession();
-  const { data: notifications = [] } = useUserNotifications(session?.id);
-  const [items, setItems] = useState(notifications);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    setItems(notifications);
-  }, [notifications]);
+  // Listen to realtime notifications for the current user
+  useNotificationRealtime(session?.id);
+
+  const { data: notifications = [] } = useUserNotifications(session?.id);
+
+  const unreadCount = notifications.filter((n: NotificationItem) => !n.read).length;
 
   const markAllRead = async () => {
-    setItems((p) => p.map((n) => ({ ...n, read: true })));
+    if (!session?.id) return;
+    try {
+      await notificationService.markAllAsRead(session.id);
+      queryClient.invalidateQueries({ queryKey: ["notifications", session.id] });
+      queryClient.invalidateQueries({ queryKey: ["unread-notifications-count", session.id] });
+      toast.success("All notifications marked as read");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update notifications");
+    }
+  };
+
+  const markSingleRead = async (n: NotificationItem) => {
+    if (n.read) return;
+    try {
+      await notificationService.markAsRead(n.id);
+      queryClient.invalidateQueries({ queryKey: ["notifications", session?.id] });
+      queryClient.invalidateQueries({ queryKey: ["unread-notifications-count", session?.id] });
+    } catch (err: any) {
+      console.error("Failed to mark notification read:", err);
+    }
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Notifications"
-        subtitle={`${items.filter((n) => !n.read).length} unread`}
+        subtitle={
+          unreadCount > 0
+            ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`
+            : "All caught up"
+        }
         action={
-          <Button variant="outline" onClick={markAllRead}>
-            Mark all read
-          </Button>
+          unreadCount > 0 ? (
+            <Button variant="outline" size="sm" onClick={markAllRead}>
+              <CheckCheck className="size-4 mr-1.5" /> Mark all read
+            </Button>
+          ) : null
         }
       />
-      <div className="surface divide-y divide-border">
-        {items.map((n) => {
-          const Icon = icons[n.type];
-          return (
-            <div key={n.id} className={cn("flex gap-3 p-4", !n.read && "bg-primary/[0.03]")}>
-              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Icon className="size-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{n.title}</p>
-                <p className="mt-0.5 text-sm text-muted-foreground">{n.message || n.body}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {relative(n.created_at || n.at || new Date().toISOString())}
-                </p>
+
+      {notifications.length === 0 ? (
+        <EmptyState
+          icon={Bell}
+          title="No notifications yet"
+          body="You will receive alerts here when live classes are scheduled, tests are published, or new notes are uploaded."
+        />
+      ) : (
+        <div className="surface divide-y divide-border overflow-hidden">
+          {notifications.map((n: NotificationItem) => {
+            const Icon = icons[n.type] || Bell;
+            return (
+              <div
+                key={n.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => markSingleRead(n)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    markSingleRead(n);
+                  }
+                }}
+                className={cn(
+                  "flex gap-3.5 p-4 text-left transition-colors cursor-pointer hover:bg-muted/40",
+                  !n.read && "bg-primary/[0.04] dark:bg-primary/[0.08]",
+                )}
+              >
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <Icon className="size-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{n.title}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                    {n.message || n.body}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {relative(n.created_at || n.at || new Date().toISOString())}
+                  </p>
+                </div>
+                {!n.read ? (
+                  <span className="mt-2 size-2 shrink-0 rounded-full bg-primary" title="Unread" />
+                ) : null}
               </div>
-              {!n.read ? <span className="mt-2 size-2 shrink-0 rounded-full bg-live" /> : null}
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

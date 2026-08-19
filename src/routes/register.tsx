@@ -9,12 +9,13 @@ import {
   Loader2,
   Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import {
   Select,
   SelectContent,
@@ -65,6 +66,16 @@ function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
+
+  // Email OTP state
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(0);
+
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -81,11 +92,24 @@ function RegisterPage() {
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
   const dobIso = fromDDMMYYYY(form.dob);
 
+  // Countdown timer for OTP resend
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+
+  const emailError = !form.email.trim()
+    ? "Email is required."
+    : !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())
+      ? "Enter a valid email address."
+      : null;
+
   const errors: Partial<Record<keyof typeof form, string>> = {};
   if (!form.name.trim()) errors.name = "Full name is required.";
-  if (!form.email.trim()) errors.email = "Email is required.";
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim()))
-    errors.email = "Enter a valid email address.";
+  if (emailError) errors.email = emailError;
   if (!form.phone.trim()) errors.phone = "Mobile number is required.";
   else if (!/^(\+91[\s-]?)?[6-9]\d{9}$/.test(form.phone.replace(/[\s-]/g, "")))
     errors.phone = "Enter a valid 10-digit Indian mobile number.";
@@ -102,9 +126,60 @@ function RegisterPage() {
   const stepOneValid = Object.keys(errors).length === 0;
   const err = (k: keyof typeof form) => (touched ? errors[k] : undefined);
 
+  // Send OTP
+  const handleSendOtp = async () => {
+    if (emailError) {
+      setTouched(true);
+      return;
+    }
+    setSendingOtp(true);
+    setOtpError(null);
+    try {
+      await authApi.sendInlineEmailOtp(form.email);
+      setOtpSent(true);
+      setCountdown(60);
+      toast.success(
+        otpSent ? "OTP sent again to your email." : "Verification code sent to your email.",
+      );
+    } catch (e) {
+      setOtpError(authMessage(e));
+      toast.error(authMessage(e));
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
+  // Verify OTP
+  const handleVerifyOtp = async (codeToVerify?: string) => {
+    const token = (codeToVerify || otp).trim();
+    if (token.length !== 6) {
+      setOtpError("Please enter the complete 6-digit verification code.");
+      return;
+    }
+    setVerifyingOtp(true);
+    setOtpError(null);
+    try {
+      await authApi.verifyInlineEmailOtp(form.email, token);
+      setEmailVerified(true);
+      setOtpSent(false);
+      setFormError(null);
+      toast.success("Email verified successfully ✓");
+    } catch (e) {
+      setOtpError(authMessage(e));
+      toast.error(authMessage(e));
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
+
   const continueToProfile = () => {
     setTouched(true);
+    if (!emailVerified) {
+      setFormError("Please verify your email address before continuing.");
+      return;
+    }
     if (stepOneValid) {
+      setFormError(null);
       setTouched(false);
       setStep(1);
     }
@@ -112,6 +187,12 @@ function RegisterPage() {
 
   const createAccount = async () => {
     setFormError(null);
+    if (!emailVerified) {
+      setTouched(true);
+      setStep(0);
+      setFormError("Please verify your email address before creating an account.");
+      return;
+    }
     if (!stepOneValid) {
       setTouched(true);
       setStep(0);
@@ -119,7 +200,7 @@ function RegisterPage() {
     }
     setSubmitting(true);
     try {
-      await authApi.register({
+      await authApi.completeInlineRegistration({
         name: form.name,
         email: form.email,
         password: form.password,
@@ -131,7 +212,7 @@ function RegisterPage() {
         parentPhone: form.parentPhone,
       });
       setStep(2);
-      toast.success("Account created successfully");
+      toast.success("Account created successfully! Please sign in.");
     } catch (e) {
       setFormError(authMessage(e));
     } finally {
@@ -200,6 +281,7 @@ function RegisterPage() {
                 <Sparkles className="mt-0.5 size-4 shrink-0" />
                 <p>Creating an account is completely free. You can purchase courses later.</p>
               </div>
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Full name" error={err("name")}>
                   <Input
@@ -208,14 +290,143 @@ function RegisterPage() {
                     placeholder="Enter your full name"
                   />
                 </Field>
+
                 <Field label="Email" error={err("email")}>
-                  <Input
-                    type="email"
-                    value={form.email}
-                    onChange={(e) => set("email")(e.target.value)}
-                    placeholder="you@example.com"
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      type="email"
+                      value={form.email}
+                      onChange={(e) => {
+                        if (!emailVerified) {
+                          set("email")(e.target.value);
+                          setOtpSent(false);
+                          setOtp("");
+                          setOtpError(null);
+                        }
+                      }}
+                      readOnly={emailVerified}
+                      disabled={emailVerified}
+                      className={cn(
+                        "flex-1",
+                        emailVerified && "bg-muted font-medium text-foreground cursor-not-allowed",
+                      )}
+                      placeholder="you@example.com"
+                    />
+                    {emailVerified ? (
+                      <div className="inline-flex h-9 items-center gap-1.5 rounded-md bg-success/15 px-3 text-xs font-semibold text-success shrink-0">
+                        <Check className="size-3.5" /> Email Verified
+                      </div>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-9 shrink-0 px-3 text-xs font-medium"
+                        disabled={sendingOtp || Boolean(emailError)}
+                        onClick={handleSendOtp}
+                      >
+                        {sendingOtp ? (
+                          <>
+                            <Loader2 className="size-3.5 animate-spin mr-1" /> Sending…
+                          </>
+                        ) : otpSent ? (
+                          "Resend OTP"
+                        ) : (
+                          "Verify Email"
+                        )}
+                      </Button>
+                    )}
+                  </div>
                 </Field>
+
+                {/* Inline OTP verification section */}
+                {otpSent && !emailVerified ? (
+                  <div className="col-span-full rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">
+                          Enter 6-digit verification code
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          We sent a code to{" "}
+                          <strong className="text-foreground">{form.email}</strong>
+                        </p>
+                      </div>
+                      {countdown > 0 ? (
+                        <span className="text-xs text-muted-foreground font-mono">
+                          Resend in {countdown}s
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleSendOtp}
+                          disabled={sendingOtp}
+                          className="text-xs font-medium text-primary hover:underline cursor-pointer"
+                        >
+                          Resend OTP
+                        </button>
+                      )}
+                    </div>
+
+                    {otpError ? (
+                      <div
+                        role="alert"
+                        className="flex items-center gap-2 rounded-lg bg-destructive/10 p-2.5 text-xs text-destructive"
+                      >
+                        <AlertCircle className="size-3.5 shrink-0" />
+                        <span>{otpError}</span>
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <InputOTP
+                        maxLength={6}
+                        value={otp}
+                        onChange={(val) => {
+                          setOtp(val);
+                          setOtpError(null);
+                          if (val.length === 6) {
+                            handleVerifyOtp(val);
+                          }
+                        }}
+                      >
+                        <InputOTPGroup>
+                          <InputOTPSlot index={0} />
+                          <InputOTPSlot index={1} />
+                          <InputOTPSlot index={2} />
+                          <InputOTPSlot index={3} />
+                          <InputOTPSlot index={4} />
+                          <InputOTPSlot index={5} />
+                        </InputOTPGroup>
+                      </InputOTP>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => handleVerifyOtp(otp)}
+                        disabled={otp.length !== 6 || verifyingOtp}
+                        className="h-9 px-4 text-xs font-medium"
+                      >
+                        {verifyingOtp ? (
+                          <>
+                            <Loader2 className="size-3.5 animate-spin mr-1.5" /> Verifying…
+                          </>
+                        ) : (
+                          "Verify OTP"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {emailVerified ? (
+                  <div className="col-span-full flex items-center gap-2 rounded-xl bg-success/10 p-3 text-xs font-medium text-success">
+                    <CheckCircle2 className="size-4 shrink-0" />
+                    <span>
+                      Email verified successfully ✓ You can now proceed with your registration.
+                    </span>
+                  </div>
+                ) : null}
+
                 <Field label="Mobile number" error={err("phone")}>
                   <Input
                     value={form.phone}
@@ -330,7 +541,8 @@ function RegisterPage() {
               <div>
                 <p className="text-xl font-semibold">Account created successfully!</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Your account has been created. Please log in to continue.
+                  Your email has been verified and your account is ready. Please sign in to
+                  continue.
                 </p>
               </div>
               <Button size="lg" onClick={() => navigate({ to: "/login" as never })}>

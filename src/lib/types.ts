@@ -7,6 +7,7 @@ export type NotificationType = "class" | "content" | "test" | "billing" | "gener
 
 export interface RoleAccount {
   id: string;
+  userId?: string;
   role: Role;
   email: string;
   password: string;

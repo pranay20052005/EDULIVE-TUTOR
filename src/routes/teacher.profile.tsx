@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { teacherService, userService } from "@/lib/db";
+import { supabase } from "@/lib/db/client";
 import { initials } from "@/lib/format";
 import { useTeacherSubjects } from "@/lib/db/hooks";
 import { useSession } from "@/lib/session";
@@ -31,7 +33,7 @@ export const Route = createFileRoute("/teacher/profile")({
 });
 
 function TeacherProfilePage() {
-  const { teacher } = useSession();
+  const { session, teacher } = useSession();
   const { data: subjects = [] } = useTeacherSubjects(teacher.id);
   const subjectName = (id: string) => subjects.find((s) => s.id === id)?.name ?? "Subject";
 
@@ -42,6 +44,8 @@ function TeacherProfilePage() {
     experienceYears: String(teacher.experienceYears),
     bio: teacher.bio,
   });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPwd, setSavingPwd] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [prefs, setPrefs] = useState({ classes: true, submissions: true, announcements: false });
   const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
@@ -63,31 +67,64 @@ function TeacherProfilePage() {
     return Object.keys(next).length === 0;
   };
 
-  const saveProfile = () => {
+  const saveProfile = async () => {
     if (!validate()) {
       toast.error("Please fix the highlighted fields");
       return;
     }
-    toast.success("Profile updated");
+    setSavingProfile(true);
+    try {
+      if (teacher.id) {
+        await teacherService.update(teacher.id, {
+          qualification: form.qualification.trim(),
+          experience_years: Number(form.experienceYears) || 0,
+          bio: form.bio.trim(),
+        });
+      }
+      const userUid = session?.userId || session?.id || teacher?.userId;
+      if (userUid) {
+        await userService.updateProfile(userUid, {
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+        });
+      }
+      toast.success("Profile updated successfully");
+    } catch (err: any) {
+      console.error("Failed to update profile:", err);
+      toast.error(err.message || "Failed to update profile");
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const validatePwd = () => {
     const next: Record<string, string> = {};
-    if (!pwd.current) next["current"] = "Enter your current password.";
-    if (pwd.next["length"] < 8) next["next"] = "New password must be at least 8 characters.";
+    if (pwd.next.length < 8) next["next"] = "New password must be at least 8 characters.";
     if (pwd.confirm !== pwd.next || !pwd.confirm) next["confirm"] = "Passwords do not match.";
     setPwdErrors(next);
     return Object.keys(next).length === 0;
   };
 
-  const changePassword = () => {
+  const changePassword = async () => {
     if (!validatePwd()) {
       toast.error("Please fix the highlighted fields");
       return;
     }
-    toast.success("Password updated");
-    setPwd({ current: "", next: "", confirm: "" });
-    setPwdErrors({});
+    setSavingPwd(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: pwd.next,
+      });
+      if (error) throw error;
+      toast.success("Password updated successfully");
+      setPwd({ current: "", next: "", confirm: "" });
+      setPwdErrors({});
+    } catch (err: any) {
+      console.error("Failed to update password:", err);
+      toast.error(err.message || "Failed to update password");
+    } finally {
+      setSavingPwd(false);
+    }
   };
 
   return (
@@ -151,8 +188,8 @@ function TeacherProfilePage() {
           </div>
         </div>
 
-        <Button className="mt-5" onClick={saveProfile}>
-          Save changes
+        <Button className="mt-5" onClick={saveProfile} disabled={savingProfile}>
+          {savingProfile ? "Saving…" : "Save changes"}
         </Button>
       </section>
 
@@ -233,8 +270,8 @@ function TeacherProfilePage() {
             ) : null}
           </div>
         </div>
-        <Button className="mt-5" variant="outline" onClick={changePassword}>
-          Update password
+        <Button className="mt-5" variant="outline" onClick={changePassword} disabled={savingPwd}>
+          {savingPwd ? "Updating…" : "Update password"}
         </Button>
       </section>
     </div>

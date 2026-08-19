@@ -17,8 +17,16 @@ import { CardSkeleton, EmptyState, PageHeader, SectionTitle, StatCard } from "@/
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { dateTimeOf, greeting, relative, timeOf } from "@/lib/format";
-import { enrollmentService, testService, scheduledClassService } from "@/lib/db";
+import {
+  enrollmentService,
+  testService,
+  scheduledClassService,
+  assignmentService,
+  materialService,
+  questionPaperService,
+} from "@/lib/db";
 import { useTeacherSubjects } from "@/lib/db/hooks";
+import { useLiveClassRealtime } from "@/lib/db/realtime";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/teacher/")({
@@ -37,7 +45,10 @@ export const Route = createFileRoute("/teacher/")({
 });
 
 function TeacherHome() {
-  const { teacher } = useSession();
+  const { session, teacher } = useSession();
+
+  // Listen to realtime live class updates
+  useLiveClassRealtime();
 
   const { data: subjects = [], isLoading: subjectsLoading } = useTeacherSubjects(teacher.id);
   const mySubjectIds = subjects.map((s) => s.id);
@@ -51,6 +62,25 @@ function TeacherHome() {
   const { data: tests = [], isLoading: testsLoading } = useQuery({
     queryKey: ["teacher-tests", teacher.id],
     queryFn: async () => (teacher.id ? testService.listByTeacher(teacher.id) : []),
+    enabled: !!teacher.id,
+  });
+
+  const { data: assignments = [] } = useQuery({
+    queryKey: ["teacher-assignments", teacher.id],
+    queryFn: async () => (teacher.id ? assignmentService.listByTeacher(teacher.id) : []),
+    enabled: !!teacher.id,
+  });
+
+  const { data: notes = [] } = useQuery({
+    queryKey: ["teacher-materials", session?.id, mySubjectIds],
+    queryFn: async () =>
+      session?.id ? materialService.listByTeacher(session.id, mySubjectIds) : [],
+    enabled: !!session?.id,
+  });
+
+  const { data: questionPapers = [] } = useQuery({
+    queryKey: ["teacher-question-papers", teacher.id],
+    queryFn: async () => (teacher.id ? questionPaperService.listByTeacher(teacher.id) : []),
     enabled: !!teacher.id,
   });
 
@@ -72,14 +102,15 @@ function TeacherHome() {
     .filter((c) => mySubjectIds.includes(c.subject_id) && c.starts_at.slice(0, 10) === todayStr)
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 
-  const myAssignments = tests.filter((t) => mySubjectIds.includes(t.subject_id));
-  const pendingReviews = myAssignments.filter((a) => a.status === "published").length;
+  const pendingReviews = assignments.filter((a) => a.status === "published").length;
 
-  const allContent = [...tests, ...classes].filter((c) => mySubjectIds.includes(c.subject_id));
-  const published = allContent.filter((c) => c.status === "published").length;
+  const allContent = [...tests, ...classes, ...assignments, ...notes, ...questionPapers].filter(
+    (c: any) => (c.subject_id ? mySubjectIds.includes(c.subject_id) : true),
+  );
+  const published = allContent.filter((c: any) => c.status === "published").length;
 
   const activity = [...allContent]
-    .sort((a, b) => +new Date(b.created_at || 0) - +new Date(a.created_at || 0))
+    .sort((a: any, b: any) => +new Date(b.created_at || 0) - +new Date(a.created_at || 0))
     .slice(0, 8);
 
   const subjectName = (id: string) => subjects.find((s) => s.id === id)?.name ?? "Subject";

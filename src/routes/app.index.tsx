@@ -25,9 +25,10 @@ import {
   useStudentEnrollments,
   usePublishedAnnouncements,
   useStudentAttendanceSummary,
-  useScheduledClassesByTeacher,
+  useScheduledClassesBySubjects,
   useStudentTestAttempts,
 } from "@/lib/db/hooks";
+import { useLiveClassRealtime } from "@/lib/db/realtime";
 import { useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/app/")({
@@ -51,6 +52,10 @@ export const Route = createFileRoute("/app/")({
 
 function StudentDashboard() {
   const { student } = useSession();
+
+  // Listen to realtime class status changes
+  useLiveClassRealtime();
+
   const { data: enrollments = [], isLoading: loadingEnrollments } = useStudentEnrollments(
     student?.id,
   );
@@ -58,11 +63,11 @@ function StudentDashboard() {
   const { data: attendanceSummary } = useStudentAttendanceSummary(student?.id);
   const { data: testAttempts = [] } = useStudentTestAttempts(student?.id);
 
-  // Get all upcoming classes for enrolled subjects
+  // Get all upcoming/live classes for enrolled subjects
   const enrolledSubjectIds = (enrollments ?? []).map((e: any) => e.subject_id);
-  const { data: allUpcomingClasses = [] } = useScheduledClassesByTeacher(undefined, "upcoming");
+  const { data: allUpcomingClasses = [] } = useScheduledClassesBySubjects(enrolledSubjectIds);
   const upcoming = (allUpcomingClasses ?? []).filter(
-    (c: any) => enrolledSubjectIds.includes(c.subject_id) && c.status !== "completed",
+    (c: any) => c.status !== "completed" && c.status !== "cancelled" && c.status !== "draft",
   );
 
   const hero = upcoming.find((c: any) => c.status === "live") ?? upcoming[0];

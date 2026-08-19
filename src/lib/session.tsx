@@ -73,6 +73,7 @@ export async function fetchCompleteProfile(userId: string): Promise<RoleAccount 
 
   const account: RoleAccount = {
     id: userRecord.id,
+    userId: userRecord.id,
     role: userRecord.role as Role,
     email: userRecord.email,
     password: "",
@@ -100,6 +101,7 @@ export async function fetchCompleteProfile(userId: string): Promise<RoleAccount 
     return {
       ...account,
       id: studentRecord?.id || userRecord.id,
+      userId: userRecord.id,
       board: studentRecord?.board || "CBSE",
       standard: studentRecord?.standard || "10th",
       dob: studentRecord?.dob || "",
@@ -126,6 +128,7 @@ export async function fetchCompleteProfile(userId: string): Promise<RoleAccount 
     return {
       ...account,
       id: teacherRecord?.id || userRecord.id,
+      userId: userRecord.id,
       qualification: teacherRecord?.qualification || "",
       experienceYears: teacherRecord?.experience_years || 0,
       bio: teacherRecord?.bio || "",
@@ -169,6 +172,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         } = await supabase.auth.getSession();
 
         if (authSession?.user && mounted) {
+          const isEmailProvider =
+            authSession.user.app_metadata?.provider === "email" ||
+            !authSession.user.app_metadata?.provider;
+          const isVerified = Boolean(
+            authSession.user.email_confirmed_at || authSession.user.confirmed_at,
+          );
+
+          if (isEmailProvider && !isVerified) {
+            if (mounted) setStatus("unauthenticated");
+            return;
+          }
+
           const account = await fetchCompleteProfile(authSession.user.id);
           if (account && mounted) {
             setCurrentUserCache(account);
@@ -197,6 +212,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, authSession) => {
       if (authSession?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
+        const isEmailProvider =
+          authSession.user.app_metadata?.provider === "email" ||
+          !authSession.user.app_metadata?.provider;
+        const isVerified = Boolean(
+          authSession.user.email_confirmed_at || authSession.user.confirmed_at,
+        );
+
+        if (isEmailProvider && !isVerified) {
+          clearCurrentUserCache();
+          setSession(null);
+          setStatus("unauthenticated");
+          return;
+        }
+
         const account = await fetchCompleteProfile(authSession.user.id);
         if (account) {
           setCurrentUserCache(account);

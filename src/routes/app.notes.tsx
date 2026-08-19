@@ -240,6 +240,8 @@ function NotesPage() {
 
 function NoteCard({ note }: { note: Material }) {
   const chapterName = note.chapter?.title || (typeof note.chapter === "string" ? note.chapter : "");
+  const hasFile = !!note.file_url && note.file_url !== "#";
+
   return (
     <article className="surface p-5">
       <div className="flex items-start justify-between gap-3">
@@ -254,21 +256,27 @@ function NoteCard({ note }: { note: Material }) {
       </p>
       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{note.description}</p>
       <p className="mt-1 text-xs text-muted-foreground">
-        {note.file_size_kb ? Math.round((note.file_size_kb / 1024) * 100) / 100 : "0.5"} MB ·{" "}
+        {note.file_size_kb ? `${(note.file_size_kb / 1024).toFixed(1)} MB` : "0.5 MB"} ·{" "}
         {relative(note.created_at)}
       </p>
-      <Button
-        size="sm"
-        className="mt-4 w-full"
-        onClick={() => toast.success(`Downloading ${note.title}`)}
-      >
-        <Download className="size-4" /> Download
-      </Button>
+      {hasFile ? (
+        <Button asChild size="sm" className="mt-4 w-full gap-2">
+          <a href={note.file_url} target="_blank" rel="noreferrer" download>
+            <Download className="size-4" /> Download Note
+          </a>
+        </Button>
+      ) : (
+        <Button size="sm" variant="outline" className="mt-4 w-full" disabled>
+          No file attached
+        </Button>
+      )}
     </article>
   );
 }
 
 function PaperCard({ paper }: { paper: QuestionPaper }) {
+  const hasFile = !!paper.file_url && paper.file_url !== "#";
+
   return (
     <article className="surface p-5">
       <div className="flex items-start justify-between gap-3">
@@ -283,16 +291,20 @@ function PaperCard({ paper }: { paper: QuestionPaper }) {
       </p>
       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{paper.description}</p>
       <p className="mt-1 text-xs text-muted-foreground">
-        {paper.total_marks || 100} marks · {paper.duration_min || 60} min · valid{" "}
-        {toDDMMYYYY(paper.available_from || "")} – {toDDMMYYYY(paper.available_until || "")}
+        {paper.total_marks || 100} marks · {paper.duration_min || 60} min
+        {paper.available_from ? ` · valid ${toDDMMYYYY(paper.available_from)}` : ""}
       </p>
-      <Button
-        size="sm"
-        className="mt-4 w-full"
-        onClick={() => toast.success(`Downloading ${paper.title}`)}
-      >
-        <Download className="size-4" /> Download
-      </Button>
+      {hasFile ? (
+        <Button asChild size="sm" className="mt-4 w-full gap-2">
+          <a href={paper.file_url} target="_blank" rel="noreferrer" download>
+            <Download className="size-4" /> Download Paper
+          </a>
+        </Button>
+      ) : (
+        <Button size="sm" variant="outline" className="mt-4 w-full" disabled>
+          No file attached
+        </Button>
+      )}
     </article>
   );
 }

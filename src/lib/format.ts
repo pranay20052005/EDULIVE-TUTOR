@@ -56,18 +56,40 @@ export function toDDMMYYYY(date: string | Date) {
 }
 
 export function fromDDMMYYYY(value: string) {
-  if (!value || !/^\d{2}\/\d{2}\/\d{4}$/.test(value.trim())) return null;
-  const [day, month, year] = value.split("/").map(Number);
-  if (!day || !month || !year) return null;
-  const parsed = new Date(year, month - 1, day);
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== month - 1 ||
-    parsed.getDate() !== day
-  ) {
-    return null;
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+
+  // Handle DD/MM/YYYY or DD-MM-YYYY
+  if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(trimmed)) {
+    const parts = trimmed.split(/[/-]/).map(Number);
+    const day = parts[0];
+    const month = parts[1];
+    const year = parts[2];
+    if (day && month && year && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const parsed = new Date(year, month - 1, day);
+      return parsed.toISOString();
+    }
   }
-  return parsed.toISOString();
+
+  // Handle YYYY-MM-DD
+  if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(trimmed)) {
+    const parts = trimmed.split(/[/-]/).map(Number);
+    const year = parts[0];
+    const month = parts[1];
+    const day = parts[2];
+    if (day && month && year && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const parsed = new Date(year, month - 1, day);
+      return parsed.toISOString();
+    }
+  }
+
+  // Try standard Date.parse
+  const parsed = new Date(trimmed);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString();
+  }
+
+  return null;
 }
 
 export function maskDOB(value: string) {

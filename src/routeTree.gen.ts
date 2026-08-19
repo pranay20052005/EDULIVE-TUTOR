@@ -17,6 +17,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TeacherRouteImport } from './routes/teacher'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
@@ -33,6 +34,7 @@ import { Route as AppNotificationsRouteImport } from './routes/app.notifications
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppRecordingsRouteImport } from './routes/app.recordings'
 import { Route as AppResultsRouteImport } from './routes/app.results'
+import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as ClassroomClassIdRouteImport } from './routes/classroom.$classId'
 import { Route as TeacherIndexRouteImport } from './routes/teacher.index'
 import { Route as TeacherAssignmentsRouteImport } from './routes/teacher.assignments'
@@ -94,6 +96,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
 const TeacherRoute = TeacherRouteImport.update({
   id: '/teacher',
   path: '/teacher',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -175,6 +182,11 @@ const AppResultsRoute = AppResultsRouteImport.update({
   id: '/results',
   path: '/results',
   getParentRoute: () => AppRoute,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ClassroomClassIdRoute = ClassroomClassIdRouteImport.update({
   id: '/classroom/$classId',
@@ -296,6 +308,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/teacher': typeof TeacherRouteWithChildren
+  '/verify-email': typeof VerifyEmailRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/students': typeof AdminStudentsRoute
@@ -310,6 +323,7 @@ export interface FileRoutesByFullPath {
   '/app/profile': typeof AppProfileRoute
   '/app/recordings': typeof AppRecordingsRoute
   '/app/results': typeof AppResultsRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/classroom/$classId': typeof ClassroomClassIdRoute
   '/teacher/assignments': typeof TeacherAssignmentsRoute
   '/teacher/attendance': typeof TeacherAttendanceRoute
@@ -341,6 +355,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/students': typeof AdminStudentsRoute
@@ -355,6 +370,7 @@ export interface FileRoutesByTo {
   '/app/profile': typeof AppProfileRoute
   '/app/recordings': typeof AppRecordingsRoute
   '/app/results': typeof AppResultsRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/classroom/$classId': typeof ClassroomClassIdRoute
   '/teacher/assignments': typeof TeacherAssignmentsRoute
   '/teacher/attendance': typeof TeacherAttendanceRoute
@@ -390,6 +406,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
   '/teacher': typeof TeacherRouteWithChildren
+  '/verify-email': typeof VerifyEmailRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/students': typeof AdminStudentsRoute
@@ -404,6 +421,7 @@ export interface FileRoutesById {
   '/app/profile': typeof AppProfileRoute
   '/app/recordings': typeof AppRecordingsRoute
   '/app/results': typeof AppResultsRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/classroom/$classId': typeof ClassroomClassIdRoute
   '/teacher/assignments': typeof TeacherAssignmentsRoute
   '/teacher/attendance': typeof TeacherAttendanceRoute
@@ -440,6 +458,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/reset-password'
     | '/teacher'
+    | '/verify-email'
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/students'
@@ -454,6 +473,7 @@ export interface FileRouteTypes {
     | '/app/profile'
     | '/app/recordings'
     | '/app/results'
+    | '/auth/callback'
     | '/classroom/$classId'
     | '/teacher/assignments'
     | '/teacher/attendance'
@@ -485,6 +505,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/reset-password'
+    | '/verify-email'
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/students'
@@ -499,6 +520,7 @@ export interface FileRouteTypes {
     | '/app/profile'
     | '/app/recordings'
     | '/app/results'
+    | '/auth/callback'
     | '/classroom/$classId'
     | '/teacher/assignments'
     | '/teacher/attendance'
@@ -533,6 +555,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/reset-password'
     | '/teacher'
+    | '/verify-email'
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/students'
@@ -547,6 +570,7 @@ export interface FileRouteTypes {
     | '/app/profile'
     | '/app/recordings'
     | '/app/results'
+    | '/auth/callback'
     | '/classroom/$classId'
     | '/teacher/assignments'
     | '/teacher/attendance'
@@ -582,6 +606,8 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TeacherRoute: typeof TeacherRouteWithChildren
+  VerifyEmailRoute: typeof VerifyEmailRoute
+  AuthCallbackRoute: typeof AuthCallbackRoute
   ClassroomClassIdRoute: typeof ClassroomClassIdRoute
 }
 
@@ -641,6 +667,13 @@ declare module '@tanstack/react-router' {
       path: '/teacher'
       fullPath: '/teacher'
       preLoaderRoute: typeof TeacherRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -754,6 +787,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/results'
       preLoaderRoute: typeof AppResultsRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/classroom/$classId': {
       id: '/classroom/$classId'
@@ -1030,6 +1070,8 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TeacherRoute: TeacherRouteWithChildren,
+  VerifyEmailRoute: VerifyEmailRoute,
+  AuthCallbackRoute: AuthCallbackRoute,
   ClassroomClassIdRoute: ClassroomClassIdRoute,
 }
 export const routeTree = rootRouteImport

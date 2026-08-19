@@ -27,12 +27,34 @@ async function runE2ETests() {
   const studentEmail = `student_e2e_${timestamp}@example.com`;
   const studentClient = createClient(supabaseUrl, anonKey);
 
+  let sUserId;
   const { data: sSignUp, error: sSignErr } = await studentClient.auth.signUp({
     email: studentEmail,
     password: testPassword,
   });
-  if (sSignErr || !sSignUp.user) throw new Error(`Sign up failed: ${sSignErr?.message}`);
-  const sUserId = sSignUp.user.id;
+
+  if (sSignErr) {
+    if (sSignErr.message.includes("rate limit")) {
+      const { data: adminCreated, error: adminErr } = await adminClient.auth.admin.createUser({
+        email: studentEmail,
+        password: testPassword,
+        email_confirm: true,
+      });
+      if (adminErr || !adminCreated.user)
+        throw new Error(`Admin createUser failed: ${adminErr?.message}`);
+      sUserId = adminCreated.user.id;
+    } else {
+      throw new Error(`Sign up failed: ${sSignErr.message}`);
+    }
+  } else {
+    sUserId = sSignUp.user.id;
+  }
+
+  // Authenticate studentClient session
+  await studentClient.auth.signInWithPassword({
+    email: studentEmail,
+    password: testPassword,
+  });
 
   const { error: sUserErr } = await studentClient.from("users").insert({
     id: sUserId,
@@ -45,12 +67,15 @@ async function runE2ETests() {
 
   const { data: sProfile, error: sProfErr } = await studentClient
     .from("students")
-    .insert({
-      user_id: sUserId,
-      board: "CBSE",
-      standard: "10th",
-      dob: "2008-01-01",
-    })
+    .upsert(
+      {
+        user_id: sUserId,
+        board: "CBSE",
+        standard: "10th",
+        dob: "2008-01-01",
+      },
+      { onConflict: "user_id" },
+    )
     .select()
     .single();
   if (sProfErr) throw new Error(`Students insert failed: ${sProfErr.message}`);
@@ -220,12 +245,15 @@ async function runE2ETests() {
   });
   const { data: tProfile } = await adminClient
     .from("teachers")
-    .insert({
-      user_id: tAuth.user.id,
-      qualification: "Ph.D Science",
-      experience_years: 10,
-      bio: "Experienced instructor.",
-    })
+    .upsert(
+      {
+        user_id: tAuth.user.id,
+        qualification: "Ph.D Science",
+        experience_years: 10,
+        bio: "Experienced instructor.",
+      },
+      { onConflict: "user_id" },
+    )
     .select()
     .single();
   const tTeacherId = tProfile.id;

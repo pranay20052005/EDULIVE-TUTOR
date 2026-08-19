@@ -168,7 +168,7 @@ export function useUpcomingClassesForStudent(studentId: string | undefined) {
   return useQuery({
     queryKey: ["upcoming-classes", studentId],
     queryFn: () =>
-      studentId ? scheduledClassService.listUpcomingForStudent(studentId) : Promise.resolve([]),
+      studentId ? scheduledClassService.listForStudent(studentId) : Promise.resolve([]),
     enabled: !!studentId,
   });
 }
@@ -281,6 +281,79 @@ export function useRecordingsBySubject(
     queryFn: () =>
       subjectId ? recordingService.listBySubject(subjectId, options) : Promise.resolve([]),
     enabled: !!subjectId,
+  });
+}
+
+export function usePublishedRecordings() {
+  return useQuery({
+    queryKey: ["recordings-published"],
+    queryFn: () => recordingService.listPublished(),
+  });
+}
+
+export function usePublishedRecordingsBySubjects(subjectIds: string[]) {
+  return useQuery({
+    queryKey: ["recordings-published-by-subjects", subjectIds],
+    queryFn: () => recordingService.listPublishedBySubjects(subjectIds),
+    enabled: subjectIds.length > 0,
+  });
+}
+
+export function useStudentRecordingProgress(studentId: string | undefined) {
+  return useQuery({
+    queryKey: ["student-recording-progress", studentId],
+    queryFn: () =>
+      studentId
+        ? import("@/lib/db/services/recording-progress").then((m) =>
+            m.recordingProgressService.listForStudent(studentId),
+          )
+        : Promise.resolve([]),
+    enabled: !!studentId,
+  });
+}
+
+export function useRecordingProgress(
+  studentId: string | undefined,
+  recordingId: string | undefined,
+) {
+  return useQuery({
+    queryKey: ["recording-progress", studentId, recordingId],
+    queryFn: () =>
+      studentId && recordingId
+        ? import("@/lib/db/services/recording-progress").then((m) =>
+            m.recordingProgressService.getProgress(studentId, recordingId),
+          )
+        : Promise.resolve(null),
+    enabled: !!studentId && !!recordingId,
+  });
+}
+
+// ============================================================
+// SCHEDULED CLASSES QUERIES
+// ============================================================
+
+export function useScheduledClass(classId: string | undefined) {
+  return useQuery({
+    queryKey: ["scheduled-class", classId],
+    queryFn: () => (classId ? scheduledClassService.getById(classId) : Promise.resolve(null)),
+    enabled: !!classId,
+  });
+}
+
+export function useScheduledClassesBySubjects(subjectIds: string[]) {
+  return useQuery({
+    queryKey: ["scheduled-classes-by-subjects", subjectIds],
+    queryFn: () => scheduledClassService.listBySubjects(subjectIds),
+    enabled: subjectIds.length > 0,
+  });
+}
+
+export function useTeacherScheduledClasses(teacherId: string | undefined) {
+  return useQuery({
+    queryKey: ["teacher-classes", teacherId],
+    queryFn: () =>
+      teacherId ? scheduledClassService.listByTeacher(teacherId) : Promise.resolve([]),
+    enabled: !!teacherId,
   });
 }
 

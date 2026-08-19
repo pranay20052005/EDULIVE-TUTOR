@@ -212,6 +212,8 @@ export interface FacultyAssignment {
   title: string;
   description?: string;
   instructions?: string;
+  file_url?: string;
+  file_name?: string;
   due_at: string;
   max_marks: number;
   status: PublishStatus;
@@ -232,6 +234,7 @@ export interface AssignmentSubmission {
   student_id: string;
   submission_text?: string;
   file_url?: string;
+  status?: string;
   submitted_at: string;
   marks?: number;
   feedback?: string;
@@ -302,6 +305,22 @@ export interface Recording {
 }
 
 /**
+ * Student's watch progress on a recorded class
+ */
+export interface StudentRecordingProgress {
+  id: string;
+  student_id: string;
+  recording_id: string;
+  progress_percent: number;
+  watched_seconds: number;
+  completed: boolean;
+  last_watched_at: string;
+  recording?: Recording;
+  created_at: string;
+  updated_at?: string;
+}
+
+/**
  * Course material (PDF, video, notes, etc.)
  */
 export interface Material {
@@ -338,6 +357,7 @@ export interface QuestionPaper {
   available_from?: string;
   available_until?: string;
   file_url?: string;
+  file_name?: string;
   file_path?: string;
   status: PublishStatus;
   subject?: Subject;

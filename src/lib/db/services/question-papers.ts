@@ -70,11 +70,47 @@ export const questionPaperService = {
   },
 
   /**
+   * Upload question paper file to Supabase Storage
+   */
+  async uploadFile(
+    file: File,
+    userId?: string,
+  ): Promise<{ url: string; path: string; name: string; sizeKB: number }> {
+    let uid = userId;
+    if (!uid) {
+      const { data: authData } = await supabase.auth.getUser();
+      uid = authData?.user?.id || "faculty";
+    }
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const filePath = `teacher/${uid}/question-papers/${Date.now()}_${sanitizedName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("question-papers")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload question paper: ${uploadError.message}`);
+    }
+
+    const { data: publicUrlData } = supabase.storage.from("question-papers").getPublicUrl(filePath);
+
+    return {
+      url: publicUrlData.publicUrl,
+      path: filePath,
+      name: file.name,
+      sizeKB: Math.round(file.size / 1024) || 1,
+    };
+  },
+
+  /**
    * Create a new question paper
    */
   async create(input: {
     subject_id: string;
-    teacher_id: string;
+    teacher_id?: string;
     title: string;
     exam_type?: string | undefined;
     description?: string | undefined;
@@ -87,9 +123,22 @@ export const questionPaperService = {
     file_name?: string | undefined;
     status?: "draft" | "published";
   }): Promise<QuestionPaper> {
+    let teacherId = input.teacher_id;
+    if (!teacherId) {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user) {
+        const { data: tRow } = await supabase
+          .from("teachers")
+          .select("id")
+          .eq("user_id", authData.user.id)
+          .single();
+        if (tRow) teacherId = tRow.id;
+      }
+    }
+
     const { data, error } = await supabase
       .from("question_papers")
-      .insert([{ ...input, status: input.status || "draft" }])
+      .insert([{ ...input, teacher_id: teacherId, status: input.status || "draft" }])
       .select("*, subject:subjects(*), teacher:teachers(*, user:users(*))")
       .single();
 
@@ -114,12 +163,13 @@ export const questionPaperService = {
       available_from: string | undefined;
       available_until: string | undefined;
       file_url: string;
+      file_name: string;
       status: "draft" | "published";
     }>,
   ): Promise<QuestionPaper> {
     const { data, error } = await supabase
       .from("question_papers")
-      .update(updates)
+      .update({ ...updates, updated_at: new Date().toISOString() })
       .eq("id", id)
       .select("*, subject:subjects(*), teacher:teachers(*, user:users(*))")
       .single();

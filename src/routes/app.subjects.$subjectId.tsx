@@ -282,15 +282,28 @@ function SubjectContent({ subject }: { subject: Subject }) {
 
         <TabsContent value="assignments" className="mt-4 space-y-3">
           {assignments.map((a: FacultyAssignment) => (
-            <div key={a.id} className="surface flex items-center gap-3 p-4">
-              <ClipboardList className="size-5 shrink-0 text-primary" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{a.title}</p>
-                <p className="text-xs text-muted-foreground">Due {dateTimeOf(a.due_at)}</p>
+            <div key={a.id} className="surface flex items-center justify-between gap-3 p-4">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <ClipboardList className="size-5 shrink-0 text-primary" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{a.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Due {dateTimeOf(a.due_at)} · {a.max_marks} marks
+                  </p>
+                </div>
               </div>
-              <Badge variant="secondary" className="shrink-0 capitalize">
-                {a.status}
-              </Badge>
+              <div className="flex items-center gap-2 shrink-0">
+                {a.file_url ? (
+                  <Button size="icon" variant="ghost" className="size-8" asChild>
+                    <a href={a.file_url} target="_blank" rel="noopener noreferrer" download>
+                      <Download className="size-4" />
+                    </a>
+                  </Button>
+                ) : null}
+                <Badge variant="secondary" className="capitalize">
+                  {a.status}
+                </Badge>
+              </div>
             </div>
           ))}
           {assignments.length === 0 ? (

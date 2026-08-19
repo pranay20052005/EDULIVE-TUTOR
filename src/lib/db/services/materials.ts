@@ -74,14 +74,71 @@ export const materialService = {
   },
 
   /**
-   * List materials created by a teacher
+   * Upload study note / material file to Supabase Storage
    */
-  async listByTeacher(teacherId: string): Promise<Material[]> {
-    const { data, error } = await supabase
+  async uploadFile(
+    file: File,
+    userId?: string,
+  ): Promise<{ url: string; path: string; name: string; sizeKB: number; fileType: string }> {
+    let uid = userId;
+    if (!uid) {
+      const { data: authData } = await supabase.auth.getUser();
+      uid = authData?.user?.id || "faculty";
+    }
+    const rawExt = file.name.split(".").pop()?.toLowerCase() || "pdf";
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const filePath = `teacher/${uid}/notes/${Date.now()}_${sanitizedName}`;
+
+    let fileType = "PDF";
+    if (["doc", "docx"].includes(rawExt)) fileType = "DOC";
+    else if (["ppt", "pptx"].includes(rawExt)) fileType = "PPT";
+    else if (["xls", "xlsx"].includes(rawExt)) fileType = "XLS";
+    else if (["png", "jpg", "jpeg", "webp", "gif"].includes(rawExt)) fileType = "Image";
+    else if (["txt"].includes(rawExt)) fileType = "TXT";
+
+    const { error: uploadError } = await supabase.storage.from("materials").upload(filePath, file, {
+      cacheControl: "3600",
+      upsert: true,
+    });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload note file: ${uploadError.message}`);
+    }
+
+    const { data: publicUrlData } = supabase.storage.from("materials").getPublicUrl(filePath);
+
+    return {
+      url: publicUrlData.publicUrl,
+      path: filePath,
+      name: file.name,
+      sizeKB: Math.round(file.size / 1024) || 1,
+      fileType,
+    };
+  },
+
+  /**
+   * List materials created by a teacher or belonging to assigned subjects
+   */
+  async listByTeacher(teacherUserId?: string, subjectIds?: string[]): Promise<Material[]> {
+    let uid = teacherUserId;
+    if (!uid) {
+      const { data: authData } = await supabase.auth.getUser();
+      uid = authData?.user?.id;
+    }
+
+    let query = supabase
       .from("materials")
-      .select("*, subject:subjects(*), chapter:chapters(*), creator:users(*)")
-      .eq("created_by", teacherId)
-      .order("created_at", { ascending: false });
+      .select("*, subject:subjects(*), chapter:chapters(*), creator:users(*)");
+
+    if (uid && subjectIds && subjectIds.length > 0) {
+      query = query.or(`created_by.eq.${uid},subject_id.in.(${subjectIds.join(",")})`);
+    } else if (uid) {
+      query = query.eq("created_by", uid);
+    } else if (subjectIds && subjectIds.length > 0) {
+      query = query.in("subject_id", subjectIds);
+    }
+
+    const { data, error } = await query.order("created_at", { ascending: false });
 
     if (error) {
       console.error("Error listing materials for teacher:", error);
@@ -103,12 +160,25 @@ export const materialService = {
     file_url: string;
     file_size_kb?: number;
     status?: "draft" | "published";
-    material_order: number;
-    created_by: string;
+    material_order?: number;
+    created_by?: string;
   }): Promise<Material> {
+    let createdBy = input.created_by;
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData?.user?.id) {
+      createdBy = authData.user.id;
+    }
+
     const { data, error } = await supabase
       .from("materials")
-      .insert([{ ...input, status: input.status || "draft" }])
+      .insert([
+        {
+          ...input,
+          created_by: createdBy,
+          material_order: input.material_order ?? 1,
+          status: input.status || "draft",
+        },
+      ])
       .select("*, subject:subjects(*), chapter:chapters(*), creator:users(*)")
       .single();
 

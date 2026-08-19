@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, FileCheck, FileText, FileUp, Loader2, Upload, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { CardSkeleton, EmptyState } from "@/components/ui-kit";
@@ -139,76 +139,195 @@ export function PublishToggle({
 }
 
 /* ------------------------------------------------------------------ *
- * Upload-style file field — stores only a filename (no real upload).
+ * Real File Upload Component with Browse Files & Storage Integration
  * ------------------------------------------------------------------ */
 
-export function FileField({
+export function FileUploadField({
   id,
   label,
-  value,
-  onChange,
+  selectedFile,
+  existingUrl,
+  existingName,
+  onFileSelect,
+  isUploading = false,
   error,
-  accept,
+  accept = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.txt",
   hint,
+  maxSizeMB = 50,
 }: {
   id: string;
   label: string;
-  value: string;
-  onChange: (value: string) => void;
+  selectedFile: File | null;
+  existingUrl?: string | undefined;
+  existingName?: string | undefined;
+  onFileSelect: (file: File | null) => void;
+  isUploading?: boolean;
   error?: string | undefined;
   accept?: string | undefined;
   hint?: string | undefined;
+  maxSizeMB?: number;
 }) {
   const [dragging, setDragging] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const handleFile = (file: File | undefined | null) => {
+    setLocalError(null);
+    if (!file) {
+      onFileSelect(null);
+      return;
+    }
+
+    const dangerousExts = [
+      ".exe",
+      ".bat",
+      ".cmd",
+      ".sh",
+      ".php",
+      ".py",
+      ".js",
+      ".vbs",
+      ".msi",
+      ".jar",
+    ];
+    const ext = "." + (file.name.split(".").pop()?.toLowerCase() || "");
+    if (dangerousExts.includes(ext)) {
+      setLocalError("Executable files are not allowed for security reasons.");
+      return;
+    }
+
+    if (file.size > maxSizeMB * 1024 * 1024) {
+      setLocalError(`File size exceeds the maximum limit of ${maxSizeMB}MB.`);
+      return;
+    }
+
+    onFileSelect(file);
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const displayError = error || localError;
 
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <div
-        className={`flex flex-col gap-2 rounded-xl border border-dashed p-3 transition-colors sm:flex-row sm:items-center ${
-          dragging ? "border-primary bg-primary/5" : "border-input"
-        }`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          const file = e.dataTransfer.files?.[0];
-          if (file) onChange(file.name);
-        }}
-      >
-        <Input
-          id={id}
-          type="text"
-          placeholder="e.g. chapter-1-notes.pdf"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          aria-invalid={!!error}
-          className="flex-1"
-        />
-        <label className="cursor-pointer">
-          <span className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-muted">
-            Browse
-          </span>
-          <input
-            type="file"
-            className="sr-only"
-            accept={accept}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onChange(file.name);
-            }}
-          />
-        </label>
-      </div>
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      {!error && hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+
+      {selectedFile ? (
+        <div className="flex items-center justify-between rounded-xl border border-border bg-card p-3 shadow-xs">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
+              <FileCheck className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{selectedFile.name}</p>
+              <p className="text-xs text-muted-foreground">{formatBytes(selectedFile.size)}</p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={isUploading}
+            onClick={() => handleFile(null)}
+            className="text-muted-foreground hover:text-destructive shrink-0"
+          >
+            <X className="size-4 mr-1" /> Remove
+          </Button>
+        </div>
+      ) : existingUrl ? (
+        <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 p-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
+              <FileText className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">
+                {existingName || "Current attached file"}
+              </p>
+              <a
+                href={existingUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-primary hover:underline"
+              >
+                View / download current file
+              </a>
+            </div>
+          </div>
+          <label className="cursor-pointer shrink-0">
+            <span className="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-muted">
+              Replace file
+            </span>
+            <input
+              id={id}
+              type="file"
+              className="sr-only"
+              accept={accept}
+              disabled={isUploading}
+              onChange={(e) => handleFile(e.target.files?.[0])}
+            />
+          </label>
+        </div>
+      ) : (
+        <div
+          className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-5 text-center transition-colors ${
+            dragging
+              ? "border-primary bg-primary/5"
+              : "border-border hover:border-muted-foreground/50"
+          }`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            handleFile(e.dataTransfer.files?.[0]);
+          }}
+        >
+          <div className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">
+            <FileUp className="size-5" />
+          </div>
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Drag and drop file here, or click Browse</p>
+            <p className="text-xs text-muted-foreground">
+              Supports PDF, DOC, DOCX, PPT, XLS, images & text up to {maxSizeMB}MB
+            </p>
+          </div>
+          <label className="cursor-pointer mt-1">
+            <span className="inline-flex h-9 items-center gap-2 rounded-md bg-secondary px-4 text-xs font-medium text-secondary-foreground shadow-xs hover:bg-secondary/80">
+              <Upload className="size-3.5" /> Browse Files
+            </span>
+            <input
+              id={id}
+              type="file"
+              className="sr-only"
+              accept={accept}
+              disabled={isUploading}
+              onChange={(e) => handleFile(e.target.files?.[0])}
+            />
+          </label>
+        </div>
+      )}
+
+      {isUploading ? (
+        <div className="flex items-center gap-2 text-xs text-primary pt-1">
+          <Loader2 className="size-3.5 animate-spin" /> Uploading to Supabase Storage…
+        </div>
+      ) : null}
+
+      {displayError ? <p className="text-xs text-destructive">{displayError}</p> : null}
+      {!displayError && hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
+
+/* Backwards-compatible alias */
+export const FileField = FileUploadField;
 
 /* ------------------------------------------------------------------ *
  * Delete confirm dialog

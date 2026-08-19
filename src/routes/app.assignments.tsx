@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { ClipboardList, Lock, Upload } from "lucide-react";
+import { ClipboardList, Download, Lock, Upload } from "lucide-react";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -215,6 +215,18 @@ function AssignmentsPage() {
                           >
                             Due {toDDMMYYYY(a.due_at)} · {a.max_marks} marks
                           </p>
+                          {a.file_url ? (
+                            <a
+                              href={a.file_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              download
+                              className="mt-2 inline-flex items-center gap-1.5 text-xs text-primary font-medium hover:underline"
+                            >
+                              <Download className="size-3.5" />{" "}
+                              {a.file_name || "Download Teacher Attachment"}
+                            </a>
+                          ) : null}
                         </div>
                         <Badge
                           className={`shrink-0 capitalize ${tone[status]}`}

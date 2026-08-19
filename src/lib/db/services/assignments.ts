@@ -71,21 +71,72 @@ export const assignmentService = {
   },
 
   /**
+   * Upload assignment attachment to Supabase Storage
+   */
+  async uploadAttachment(
+    file: File,
+    userId?: string,
+  ): Promise<{ url: string; path: string; name: string; sizeKB: number }> {
+    let uid = userId;
+    if (!uid) {
+      const { data: authData } = await supabase.auth.getUser();
+      uid = authData?.user?.id || "faculty";
+    }
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const filePath = `teacher/${uid}/assignments/${Date.now()}_${sanitizedName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("assignments")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload assignment attachment: ${uploadError.message}`);
+    }
+
+    const { data: publicUrlData } = supabase.storage.from("assignments").getPublicUrl(filePath);
+
+    return {
+      url: publicUrlData.publicUrl,
+      path: filePath,
+      name: file.name,
+      sizeKB: Math.round(file.size / 1024) || 1,
+    };
+  },
+
+  /**
    * Create a new assignment
    */
   async create(input: {
     subject_id: string;
-    teacher_id: string;
+    teacher_id?: string;
     title: string;
     description?: string;
     instructions?: string;
+    file_url?: string;
+    file_name?: string;
     due_at: string;
     max_marks?: number;
     status?: "draft" | "published";
   }): Promise<FacultyAssignment> {
+    let teacherId = input.teacher_id;
+    if (!teacherId) {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user) {
+        const { data: tRow } = await supabase
+          .from("teachers")
+          .select("id")
+          .eq("user_id", authData.user.id)
+          .single();
+        if (tRow) teacherId = tRow.id;
+      }
+    }
+
     const { data, error } = await supabase
       .from("assignments")
-      .insert([{ ...input, status: input.status || "draft" }])
+      .insert([{ ...input, teacher_id: teacherId, status: input.status || "draft" }])
       .select("*, subject:subjects(*), teacher:teachers(*, user:users(*))")
       .single();
 
@@ -106,6 +157,8 @@ export const assignmentService = {
       title: string;
       description: string;
       instructions: string;
+      file_url: string;
+      file_name: string;
       due_at: string;
       max_marks: number;
       status: "draft" | "published";
@@ -113,7 +166,7 @@ export const assignmentService = {
   ): Promise<FacultyAssignment> {
     const { data, error } = await supabase
       .from("assignments")
-      .update(updates)
+      .update({ ...updates, updated_at: new Date().toISOString() })
       .eq("id", id)
       .select("*, subject:subjects(*), teacher:teachers(*, user:users(*))")
       .single();

@@ -67,7 +67,27 @@ export const scheduledClassService = {
       return [];
     }
 
-    return data;
+    return data || [];
+  },
+
+  /**
+   * List scheduled classes for multiple subjects
+   */
+  async listBySubjects(subjectIds: string[]): Promise<ScheduledClass[]> {
+    if (!subjectIds.length) return [];
+
+    const { data, error } = await supabase
+      .from("scheduled_classes")
+      .select("*, subject:subjects(*), teacher:teachers(*, user:users(*))")
+      .in("subject_id", subjectIds)
+      .order("starts_at", { ascending: true });
+
+    if (error) {
+      console.error("Error listing scheduled classes by subjects:", error);
+      return [];
+    }
+
+    return data || [];
   },
 
   /**
@@ -90,23 +110,43 @@ export const scheduledClassService = {
       return [];
     }
 
-    return data;
+    return data || [];
   },
 
   /**
-   * List upcoming/live classes for a student's enrolled subjects
+   * List classes for a student's enrolled subjects
    */
-  async listUpcomingForStudent(studentId: string): Promise<ScheduledClass[]> {
-    const { data, error } = await supabase.rpc("get_student_upcoming_classes", {
-      student_id_param: studentId,
-    });
+  async listForStudent(studentId: string): Promise<ScheduledClass[]> {
+    const { data: enrollments, error: enrollError } = await supabase
+      .from("enrollments")
+      .select("subject_id")
+      .eq("student_id", studentId)
+      .eq("status", "active");
 
-    if (error) {
-      console.error("Error listing upcoming classes for student:", error);
+    if (enrollError || !enrollments || enrollments.length === 0) {
       return [];
     }
 
-    return data || [];
+    const subjectIds = enrollments.map((e: any) => e.subject_id);
+    return this.listBySubjects(subjectIds);
+  },
+
+  /**
+   * Verify if a student has an active enrollment in a class's subject
+   */
+  async isStudentEnrolled(studentId: string, classId: string): Promise<boolean> {
+    const cls = await this.getById(classId);
+    if (!cls) return false;
+
+    const { data, error } = await supabase
+      .from("enrollments")
+      .select("id")
+      .eq("student_id", studentId)
+      .eq("subject_id", cls.subject_id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    return !error && !!data;
   },
 
   /**
@@ -114,7 +154,7 @@ export const scheduledClassService = {
    */
   async create(input: {
     subject_id: string;
-    teacher_id: string;
+    teacher_id?: string;
     title: string;
     topic?: string;
     chapter?: string;
@@ -124,9 +164,22 @@ export const scheduledClassService = {
     meeting_url?: string;
     status?: "scheduled" | "live" | "completed" | "draft";
   }): Promise<ScheduledClass> {
+    let teacherId = input.teacher_id;
+    if (!teacherId) {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user) {
+        const { data: tRow } = await supabase
+          .from("teachers")
+          .select("id")
+          .eq("user_id", authData.user.id)
+          .single();
+        if (tRow) teacherId = tRow.id;
+      }
+    }
+
     const { data, error } = await supabase
       .from("scheduled_classes")
-      .insert([{ ...input, status: input.status || "scheduled" }])
+      .insert([{ ...input, teacher_id: teacherId, status: input.status || "scheduled" }])
       .select("*, subject:subjects(*), teacher:teachers(*, user:users(*))")
       .single();
 
@@ -151,12 +204,13 @@ export const scheduledClassService = {
       starts_at: string;
       ends_at: string;
       meeting_url: string;
+      cancelled: boolean;
       status: "scheduled" | "live" | "completed" | "draft" | "cancelled" | "published" | "upcoming";
     }>,
   ): Promise<ScheduledClass> {
     const { data, error } = await supabase
       .from("scheduled_classes")
-      .update(updates)
+      .update({ ...updates, updated_at: new Date().toISOString() })
       .eq("id", id)
       .select("*, subject:subjects(*), teacher:teachers(*, user:users(*))")
       .single();
@@ -166,6 +220,27 @@ export const scheduledClassService = {
     }
 
     return data;
+  },
+
+  /**
+   * Start a class (mark live)
+   */
+  async startClass(id: string): Promise<ScheduledClass> {
+    return this.update(id, { status: "live" });
+  },
+
+  /**
+   * End a class (mark completed)
+   */
+  async endClass(id: string): Promise<ScheduledClass> {
+    return this.update(id, { status: "completed" });
+  },
+
+  /**
+   * Cancel a class
+   */
+  async cancelClass(id: string): Promise<ScheduledClass> {
+    return this.update(id, { status: "cancelled", cancelled: true });
   },
 
   /**

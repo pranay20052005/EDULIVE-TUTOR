@@ -19,6 +19,7 @@ export * from "./services/assignments";
 export * from "./services/scheduled-classes";
 export * from "./services/attendance";
 export * from "./services/recordings";
+export * from "./services/recording-progress";
 export * from "./services/question-papers";
 export * from "./services/test-attempts";
 export * from "./services/test-answers";

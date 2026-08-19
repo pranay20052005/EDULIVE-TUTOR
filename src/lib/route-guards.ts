@@ -46,7 +46,35 @@ export function setCurrentUserCache(user: {
 }
 
 /**
+ * Check if the active session belongs to an unverified email user
+ */
+export async function getUnverifiedEmail(): Promise<string | null> {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.user) {
+    return null;
+  }
+
+  const isEmailProvider =
+    session.user.app_metadata?.provider === "email" || !session.user.app_metadata?.provider;
+  const isVerified = Boolean(session.user.email_confirmed_at || session.user.confirmed_at);
+
+  if (isEmailProvider && !isVerified) {
+    return session.user.email || "";
+  }
+
+  return null;
+}
+
+/**
  * Get current authenticated user and their role with smart caching
+ * Only returns verified users.
  */
 export async function getCurrentUserWithRole() {
   if (typeof window === "undefined") {
@@ -58,6 +86,16 @@ export async function getCurrentUserWithRole() {
   } = await supabase.auth.getSession();
 
   if (!session?.user) {
+    cachedUser = null;
+    return null;
+  }
+
+  // Reject unverified email/password users
+  const isEmailProvider =
+    session.user.app_metadata?.provider === "email" || !session.user.app_metadata?.provider;
+  const isVerified = Boolean(session.user.email_confirmed_at || session.user.confirmed_at);
+
+  if (isEmailProvider && !isVerified) {
     cachedUser = null;
     return null;
   }
@@ -105,10 +143,19 @@ export async function getCurrentUserWithRole() {
 }
 
 /**
- * Protect routes - redirect to login if not authenticated
+ * Protect routes - redirect to login or verify-email if not authenticated / unverified
  */
 export async function protectedRouteLoader() {
   if (typeof window === "undefined") return null;
+
+  const unverifiedEmail = await getUnverifiedEmail();
+  if (unverifiedEmail) {
+    throw redirect({
+      to: "/verify-email",
+      search: { email: unverifiedEmail },
+    });
+  }
+
   const user = await getCurrentUserWithRole();
   if (!user) {
     throw redirect({
@@ -120,10 +167,19 @@ export async function protectedRouteLoader() {
 }
 
 /**
- * Protect student routes - ensure user is a student
+ * Protect student routes - ensure user is a verified student
  */
 export async function studentRouteLoader() {
   if (typeof window === "undefined") return null;
+
+  const unverifiedEmail = await getUnverifiedEmail();
+  if (unverifiedEmail) {
+    throw redirect({
+      to: "/verify-email",
+      search: { email: unverifiedEmail },
+    });
+  }
+
   const user = await getCurrentUserWithRole();
   if (!user) {
     throw redirect({
@@ -140,10 +196,19 @@ export async function studentRouteLoader() {
 }
 
 /**
- * Protect teacher routes - ensure user is a teacher
+ * Protect teacher routes - ensure user is a verified teacher
  */
 export async function teacherRouteLoader() {
   if (typeof window === "undefined") return null;
+
+  const unverifiedEmail = await getUnverifiedEmail();
+  if (unverifiedEmail) {
+    throw redirect({
+      to: "/verify-email",
+      search: { email: unverifiedEmail },
+    });
+  }
+
   const user = await getCurrentUserWithRole();
   if (!user) {
     throw redirect({
@@ -160,10 +225,19 @@ export async function teacherRouteLoader() {
 }
 
 /**
- * Protect admin routes - ensure user is an admin
+ * Protect admin routes - ensure user is a verified admin
  */
 export async function adminRouteLoader() {
   if (typeof window === "undefined") return null;
+
+  const unverifiedEmail = await getUnverifiedEmail();
+  if (unverifiedEmail) {
+    throw redirect({
+      to: "/verify-email",
+      search: { email: unverifiedEmail },
+    });
+  }
+
   const user = await getCurrentUserWithRole();
   if (!user) {
     throw redirect({
@@ -196,7 +270,7 @@ export async function publicRouteLoader() {
 /**
  * Get home path for a role
  */
-function getHomeForRole(role: Role): string {
+export function getHomeForRole(role: Role): string {
   switch (role) {
     case "student":
       return "/app";

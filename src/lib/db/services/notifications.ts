@@ -88,12 +88,60 @@ export const notificationService = {
   },
 
   /**
+   * Batch notify all students actively enrolled in a subject
+   */
+  async notifyEnrolledStudents(
+    subjectId: string,
+    payload: {
+      type: "class" | "content" | "test" | "billing" | "general";
+      title: string;
+      message: string;
+      related_entity_id?: string;
+      related_entity_type?: string;
+    },
+  ): Promise<number> {
+    const { data: enrollments, error } = await supabase
+      .from("enrollments")
+      .select("student:students(user_id)")
+      .eq("subject_id", subjectId)
+      .eq("status", "active");
+
+    if (error || !enrollments || enrollments.length === 0) {
+      return 0;
+    }
+
+    const userIds = Array.from(
+      new Set(enrollments.map((e: any) => e.student?.user_id).filter(Boolean)),
+    );
+
+    if (userIds.length === 0) return 0;
+
+    const rows = userIds.map((uid) => ({
+      user_id: uid,
+      type: payload.type,
+      title: payload.title,
+      message: payload.message,
+      related_entity_id: payload.related_entity_id,
+      related_entity_type: payload.related_entity_type,
+      read: false,
+    }));
+
+    const { error: insertError } = await supabase.from("notifications").insert(rows);
+    if (insertError) {
+      console.error("Error batch inserting notifications:", insertError);
+      return 0;
+    }
+
+    return rows.length;
+  },
+
+  /**
    * Mark notification as read
    */
   async markAsRead(id: string): Promise<NotificationItem> {
     const { data, error } = await supabase
       .from("notifications")
-      .update({ read: true, read_at: new Date().toISOString() })
+      .update({ read: true, updated_at: new Date().toISOString() })
       .eq("id", id)
       .select("*, user:users(*)")
       .single();
@@ -111,7 +159,7 @@ export const notificationService = {
   async markAllAsRead(userId: string): Promise<void> {
     const { error } = await supabase
       .from("notifications")
-      .update({ read: true, read_at: new Date().toISOString() })
+      .update({ read: true, updated_at: new Date().toISOString() })
       .eq("user_id", userId)
       .eq("read", false);
 

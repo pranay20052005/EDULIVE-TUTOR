@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useRouterState } from "@tanstack/react-router";
-import { FileText, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Download, FileText, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import {
   ContentError,
   ContentLoading,
   FieldError,
-  FileField,
+  FileUploadField,
   FormActions,
   PublishToggle,
   StatusBadge,
@@ -54,45 +54,47 @@ export const Route = createFileRoute("/teacher/notes")({
   component: TeacherNotes,
 });
 
-const FILE_TYPES = ["PDF", "DOC", "PPT", "Image", "Link"];
-
 interface FormState {
   id: string;
   subjectId: string;
   title: string;
-  chapter: string;
   description: string;
+  fileUrl: string;
   fileName: string;
   fileType: string;
-  sizeKB: string;
+  sizeKB: number;
   status: PublishStatus;
 }
 
 const emptyForm = (subjectId: string): FormState => ({
   id: "",
-  subjectId,
+  subjectId: subjectId || "",
   title: "",
-  chapter: "",
   description: "",
+  fileUrl: "",
   fileName: "",
   fileType: "PDF",
-  sizeKB: "1024",
+  sizeKB: 1024,
   status: "draft",
 });
 
 function TeacherNotes() {
-  const { teacher } = useSession();
+  const { session, teacher } = useSession();
   const queryClient = useQueryClient();
-  const { data: subjects = [], isLoading: subjectsLoading } = useTeacherSubjects(teacher.id);
+  const { data: subjects = [], isLoading: subjectsLoading } = useTeacherSubjects(teacher?.id);
+
+  const subjectIds = useMemo(() => subjects.map((s) => s.id), [subjects]);
+
+  const teacherUid = session?.userId || session?.id || teacher?.userId;
 
   const {
     data: notes = [],
     isLoading: notesLoading,
     error,
   } = useQuery({
-    queryKey: ["teacher-materials", teacher.id],
-    queryFn: () => (teacher.id ? materialService.listByTeacher(teacher.id) : Promise.resolve([])),
-    enabled: !!teacher.id,
+    queryKey: ["teacher-materials", teacherUid, subjectIds],
+    queryFn: () => materialService.listByTeacher(teacherUid, subjectIds),
+    enabled: true,
   });
 
   const [subjectFilter, setSubjectFilter] = useState("all");
@@ -101,7 +103,9 @@ function TeacherNotes() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm(subjects[0]?.id ?? ""));
-  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<keyof FormState | "file", string>>>({});
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const searchState = useRouterState({ select: (s) => s.location.search }) as {
@@ -133,7 +137,10 @@ function TeacherNotes() {
   const subjectName = (id: string) => subjects.find((s) => s.id === id)?.name ?? "Subject";
 
   function openCreate() {
-    setForm(emptyForm(subjects[0]?.id ?? ""));
+    const defaultSubId = form.subjectId || subjects[0]?.id || "";
+    setForm(emptyForm(defaultSubId));
+    setSelectedFile(null);
+    setIsUploading(false);
     setErrors({});
     setDialogOpen(true);
   }
@@ -143,60 +150,88 @@ function TeacherNotes() {
       id: n.id,
       subjectId: n.subject_id,
       title: n.title,
-      chapter: "",
       description: n.description || "",
-      fileName: n.file_url || "",
+      fileUrl: n.file_url || "",
+      fileName: n.file_url ? n.file_url.split("/").pop() || "note-file" : "",
       fileType: n.file_type || "PDF",
-      sizeKB: String(n.file_size_kb || 1024),
+      sizeKB: n.file_size_kb || 1024,
       status: n.status,
     });
+    setSelectedFile(null);
+    setIsUploading(false);
     setErrors({});
     setDialogOpen(true);
   }
 
   function validate(): boolean {
-    const next: Partial<Record<keyof FormState, string>> = {};
-    if (!form.subjectId) next.subjectId = "Select a subject.";
+    const next: Partial<Record<keyof FormState | "file", string>> = {};
+    const effectiveSubjectId = form.subjectId || subjects[0]?.id;
+    if (!effectiveSubjectId) next.subjectId = "Select a subject.";
     if (!form.title.trim()) next.title = "Title is required.";
-    if (!form.description.trim()) next.description = "Description is required.";
+    if (!form.id && !selectedFile && !form.fileUrl) {
+      next.file = "Please select a file to upload.";
+    }
     setErrors(next);
-    return Object.keys(next).length === 0;
+    const isValid = Object.keys(next).length === 0;
+    if (!isValid) {
+      const firstError = Object.values(next)[0];
+      toast.error(firstError || "Please check required fields");
+    }
+    return isValid;
   }
 
   async function handleSubmit() {
     if (!validate()) return;
     const isEdit = !!form.id;
+    const effectiveSubjectId = form.subjectId || subjects[0]?.id;
 
+    setIsUploading(true);
     try {
+      let fileUrl = form.fileUrl;
+      let fileType = form.fileType;
+      let sizeKB = form.sizeKB;
+
+      if (selectedFile) {
+        const uploadResult = await materialService.uploadFile(selectedFile, teacherUid);
+        fileUrl = uploadResult.url;
+        fileType = uploadResult.fileType;
+        sizeKB = uploadResult.sizeKB;
+      }
+
       if (isEdit) {
         await materialService.update(form.id, {
           title: form.title.trim(),
           description: form.description.trim(),
-          file_url: form.fileName.trim() || "#",
-          file_type: form.fileType,
-          file_size_kb: Number(form.sizeKB) || 1024,
+          file_url: fileUrl,
+          file_type: fileType,
+          file_size_kb: sizeKB,
           status: form.status,
         });
-        toast.success("Note updated");
+        toast.success("Note updated successfully");
       } else {
         await materialService.create({
-          subject_id: form.subjectId,
+          subject_id: effectiveSubjectId,
           title: form.title.trim(),
           description: form.description.trim(),
-          file_url: form.fileName.trim() || "#",
-          file_type: form.fileType,
-          file_size_kb: Number(form.sizeKB) || 1024,
+          file_url: fileUrl || "#",
+          file_type: fileType,
+          file_size_kb: sizeKB,
           status: form.status,
           material_order: notes.length + 1,
-          created_by: teacher.id,
+          created_by: teacherUid,
         });
-        toast.success("Note uploaded");
+        toast.success("Note uploaded successfully");
       }
+
       queryClient.invalidateQueries({ queryKey: ["teacher-materials"] });
       queryClient.invalidateQueries({ queryKey: ["materials"] });
+      queryClient.invalidateQueries({ queryKey: ["materials-by-subjects"] });
       setDialogOpen(false);
     } catch (err: any) {
-      toast.error(err.message || "Failed to save note");
+      console.error("Failed to save note:", err);
+      toast.error(err.message || "Failed to save note. Please try again.");
+    } finally {
+      setIsUploading(false);
     }
   }
 
@@ -206,9 +241,11 @@ function TeacherNotes() {
       await materialService.delete(deleteId);
       queryClient.invalidateQueries({ queryKey: ["teacher-materials"] });
       queryClient.invalidateQueries({ queryKey: ["materials"] });
+      queryClient.invalidateQueries({ queryKey: ["materials-by-subjects"] });
       toast.success("Note deleted");
       setDeleteId(null);
     } catch (err: any) {
+      console.error("Failed to delete note:", err);
       toast.error(err.message || "Failed to delete note");
     }
   }
@@ -218,8 +255,10 @@ function TeacherNotes() {
       await materialService.updateStatus(id, status);
       queryClient.invalidateQueries({ queryKey: ["teacher-materials"] });
       queryClient.invalidateQueries({ queryKey: ["materials"] });
+      queryClient.invalidateQueries({ queryKey: ["materials-by-subjects"] });
       toast.success(status === "published" ? "Note published" : "Note moved to draft");
     } catch (err: any) {
+      console.error("Failed to update note status:", err);
       toast.error(err.message || "Failed to update note status");
     }
   }
@@ -227,7 +266,7 @@ function TeacherNotes() {
   if (subjectsLoading || notesLoading) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Notes & PDFs" subtitle="Study material for your subjects" />
+        <PageHeader title="Notes & Study Material" subtitle="Study material for your subjects" />
         <ContentLoading />
       </div>
     );
@@ -236,7 +275,7 @@ function TeacherNotes() {
   if (error) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Notes & PDFs" subtitle="Study material for your subjects" />
+        <PageHeader title="Notes & Study Material" subtitle="Study material for your subjects" />
         <ContentError message={(error as Error).message} />
       </div>
     );
@@ -245,11 +284,11 @@ function TeacherNotes() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Notes & PDFs"
-        subtitle="Upload and manage study material for your students"
+        title="Notes & Study Material"
+        subtitle="Upload and manage study notes, worksheets and PDFs for your students"
         action={
-          <Button onClick={openCreate}>
-            <Plus className="size-4" /> Upload note
+          <Button onClick={openCreate} className="gap-2">
+            <Plus className="size-4" /> Add Notes / Study Material
           </Button>
         }
       />
@@ -295,12 +334,12 @@ function TeacherNotes() {
           body={
             subjects.length === 0
               ? "You have no subjects assigned yet."
-              : "Upload your first note or adjust your filters."
+              : "Upload your first note or study material."
           }
           action={
             subjects.length > 0 ? (
-              <Button onClick={openCreate}>
-                <Plus className="size-4" /> Upload note
+              <Button onClick={openCreate} className="gap-2">
+                <Plus className="size-4" /> Add Notes / Study Material
               </Button>
             ) : undefined
           }
@@ -318,13 +357,29 @@ function TeacherNotes() {
                 </div>
                 <StatusBadge status={n.status} />
               </div>
-              <p className="line-clamp-2 text-xs text-muted-foreground">{n.description}</p>
-              <p className="text-xs text-muted-foreground">
-                {n.file_type} ·{" "}
-                {n.file_size_kb ? `${Math.round((n.file_size_kb / 1024) * 100) / 100} MB` : "File"}{" "}
-                · {relative(n.created_at)}
+              <p className="line-clamp-2 text-xs text-muted-foreground">
+                {n.description || "No description provided."}
               </p>
-              <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  {n.file_type || "PDF"} ·{" "}
+                  {n.file_size_kb ? `${(n.file_size_kb / 1024).toFixed(1)} MB` : "Document"}
+                </span>
+                <span>{relative(n.created_at)}</span>
+              </div>
+
+              {n.file_url && n.file_url !== "#" ? (
+                <a
+                  href={n.file_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-primary font-medium hover:underline pt-1"
+                >
+                  <Download className="size-3.5" /> Download / View File
+                </a>
+              ) : null}
+
+              <div className="mt-auto flex items-center justify-between gap-2 pt-2 border-t border-border/40">
                 <PublishToggle
                   status={n.status}
                   onChange={(status) => handleToggleStatus(n.id, status)}
@@ -353,10 +408,12 @@ function TeacherNotes() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => !isUploading && setDialogOpen(open)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{form.id ? "Edit note" : "Upload note"}</DialogTitle>
+            <DialogTitle>
+              {form.id ? "Edit Note / Study Material" : "Add Notes / Study Material"}
+            </DialogTitle>
           </DialogHeader>
           {subjects.length === 0 ? (
             <div className="space-y-4 py-2">
@@ -383,69 +440,70 @@ function TeacherNotes() {
                   <Label htmlFor="note-subject">Subject</Label>
                   <SubjectPicker
                     subjects={subjects}
-                    value={form.subjectId}
+                    value={form.subjectId || subjects[0]?.id || ""}
                     onChange={(v) => setForm((f) => ({ ...f, subjectId: v }))}
                     id="note-subject"
                   />
                   <FieldError error={errors.subjectId} />
                 </div>
+
                 <div className="space-y-1.5">
-                  <Label htmlFor="note-title">Title</Label>
+                  <Label htmlFor="note-title">Title *</Label>
                   <Input
                     id="note-title"
+                    placeholder="e.g. Chapter 4: Quadratic Equations - Revision Notes"
                     value={form.title}
                     onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                     aria-invalid={!!errors.title}
                   />
                   <FieldError error={errors.title} />
                 </div>
+
                 <div className="space-y-1.5">
-                  <Label htmlFor="note-description">Description</Label>
+                  <Label htmlFor="note-description">Description / Chapter info (optional)</Label>
                   <Textarea
                     id="note-description"
+                    placeholder="Brief description or chapter notes instructions for students..."
                     value={form.description}
                     onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                     aria-invalid={!!errors.description}
                   />
                   <FieldError error={errors.description} />
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="note-type">Type</Label>
-                    <Select
-                      value={form.fileType}
-                      onValueChange={(v) => setForm((f) => ({ ...f, fileType: v }))}
-                    >
-                      <SelectTrigger id="note-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {FILE_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+
+                <FileUploadField
+                  id="note-file"
+                  label="Attach Study Note / Document *"
+                  selectedFile={selectedFile}
+                  existingUrl={form.fileUrl}
+                  existingName={form.fileName}
+                  onFileSelect={(file) => setSelectedFile(file)}
+                  isUploading={isUploading}
+                  error={errors.file}
+                  hint="Supported: PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, Images, TXT (up to 50MB)"
+                />
+
+                <div className="flex items-center justify-between rounded-xl border border-border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Publish immediately</p>
+                    <p className="text-xs text-muted-foreground">
+                      Make this study note visible to all enrolled students right away.
+                    </p>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="note-size">Size (KB)</Label>
-                    <Input
-                      id="note-size"
-                      type="number"
-                      min="1"
-                      value={form.sizeKB}
-                      onChange={(e) => setForm((f) => ({ ...f, sizeKB: e.target.value }))}
-                      aria-invalid={!!errors.sizeKB}
-                    />
-                    <FieldError error={errors.sizeKB} />
-                  </div>
+                  <PublishToggle
+                    status={form.status}
+                    onChange={(status) => setForm((f) => ({ ...f, status }))}
+                    disabled={isUploading}
+                  />
                 </div>
               </div>
+
               <DialogFooter>
                 <FormActions>
                   <CancelButton onClick={() => setDialogOpen(false)} />
-                  <Button onClick={handleSubmit}>{form.id ? "Save changes" : "Upload"}</Button>
+                  <Button onClick={handleSubmit} disabled={isUploading}>
+                    {isUploading ? "Uploading file…" : form.id ? "Save changes" : "Upload note"}
+                  </Button>
                 </FormActions>
               </DialogFooter>
             </>
