@@ -213,6 +213,7 @@ export interface FacultyAssignment {
   id: string;
   subject_id: string;
   teacher_id: string;
+  batch_id?: string;
   title: string;
   description?: string;
   instructions?: string;
@@ -256,6 +257,7 @@ export interface ScheduledClass {
   id: string;
   subject_id: string;
   teacher_id: string;
+  batch_id?: string;
   title: string;
   topic?: string;
   chapter?: string;
@@ -466,4 +468,53 @@ export interface Setting {
   updated_by?: string;
   created_at: string;
   updated_at?: string;
+}
+
+/**
+ * Batch definition
+ */
+export interface Batch {
+  id: string;
+  subject_id: string;
+  name: string;
+  standard: string;
+  timing?: string;
+  capacity: number;
+  teacher_id?: string;
+  status: "active" | "archived";
+  subject?: Subject;
+  teacher?: Teacher;
+  student_count?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+/**
+ * Batch student association
+ */
+export interface BatchStudent {
+  id: string;
+  batch_id: string;
+  student_id: string;
+  assigned_at: string;
+  batch?: Batch;
+  student?: Student;
+}
+
+/**
+ * Course completion certificate
+ */
+export interface CourseCertificate {
+  id: string;
+  certificate_number: string;
+  student_id: string;
+  subject_id: string;
+  student_name: string;
+  course_name: string;
+  standard: string;
+  score_percentage: number;
+  issue_date: string;
+  verification_url?: string;
+  status: "valid" | "revoked";
+  created_at: string;
 }

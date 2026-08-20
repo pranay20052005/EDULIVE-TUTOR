@@ -1,8 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { AlertCircle, GraduationCap, Loader2 } from "lucide-react";
+import { AlertCircle, GraduationCap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { BookLoader } from "@/components/book-loader";
 import { Button } from "@/components/ui/button";
 import { authApi } from "@/lib/auth";
 import { supabase } from "@/lib/db/client";
@@ -148,14 +149,8 @@ function AuthCallbackPage() {
               </Button>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-4 py-4">
-              <span className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-                <Loader2 className="size-6 animate-spin" />
-              </span>
-              <div>
-                <h1 className="text-lg font-semibold sm:text-xl">Signing you in</h1>
-                <p className="mt-1 text-xs text-muted-foreground">{statusText}</p>
-              </div>
+            <div className="flex flex-col items-center py-4">
+              <BookLoader text="Signing you in" subtitle={statusText} />
             </div>
           )}
         </div>

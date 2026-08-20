@@ -28,6 +28,8 @@ export * from "./services/notifications";
 export * from "./services/announcements";
 export * from "./services/payments";
 export * from "./services/subscription-plans";
+export * from "./services/batches";
+export * from "./services/certificates";
 
 // Aliases for compatibility
 export { subscriptionPlanService as subscriptionPlansService } from "./services/subscription-plans";

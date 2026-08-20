@@ -176,6 +176,12 @@ function TeacherLive() {
     if (!form.endTime) next.endTime = "End time is required.";
     if (form.startTime && form.endTime && form.endTime <= form.startTime)
       next.endTime = "End time must be after start time.";
+    if (form.meetingUrl.trim()) {
+      const trimmedUrl = form.meetingUrl.trim();
+      if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) {
+        next.meetingUrl = "Please enter a valid meeting URL (e.g. https://meet.google.com/...)";
+      }
+    }
     setErrors(next);
     const isValid = Object.keys(next).length === 0;
     if (!isValid) {
@@ -442,10 +448,32 @@ function TeacherLive() {
                           <Video className="size-3.5 mr-1" /> Enter Classroom
                         </Link>
                       </Button>
+                      {c.meeting_url ? (
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                          onClick={() => {
+                            window.open(c.meeting_url, "_blank", "noopener,noreferrer");
+                          }}
+                        >
+                          <ExternalLink className="size-3.5 mr-1" /> Open Meet
+                        </Button>
+                      ) : null}
                       <Button size="sm" variant="secondary" onClick={() => handleEndClass(c)}>
                         <CheckCircle className="size-3.5 mr-1" /> End Class
                       </Button>
                     </>
+                  ) : c.meeting_url ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-emerald-600 hover:text-emerald-700 border-emerald-600/30"
+                      onClick={() => {
+                        window.open(c.meeting_url, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      <ExternalLink className="size-3.5 mr-1" /> Open Meet
+                    </Button>
                   ) : null}
 
                   {c.status === "scheduled" ? (

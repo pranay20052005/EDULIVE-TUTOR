@@ -63,11 +63,59 @@ export function homeForRole(role: Role) {
  * Helper to fetch complete user profile in parallel
  */
 export async function fetchCompleteProfile(userId: string): Promise<RoleAccount | null> {
-  const { data: userRecord, error } = await supabase
+  if (!userId) return null;
+
+  const { data: initialUser, error } = await supabase
     .from("users")
     .select("id, email, role, name, phone")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
+
+  let userRecord = initialUser;
+
+  // If not found by ID, check if auth user exists and look up by email
+  if (!userRecord) {
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (authUser && (authUser.id === userId || authUser.email)) {
+      const email = authUser.email?.toLowerCase();
+      if (email) {
+        const { data: byEmail } = await supabase
+          .from("users")
+          .select("id, email, role, name, phone")
+          .eq("email", email)
+          .maybeSingle();
+
+        if (byEmail) {
+          userRecord = byEmail;
+        } else {
+          // Auto-provision user record from auth metadata
+          const meta = authUser.user_metadata || {};
+          const assignedRole: Role = (meta.role as Role) || "student";
+          const name = meta.name || email.split("@")[0] || "User";
+          const phone = meta.phone || "";
+
+          const { data: createdUser } = await supabase
+            .from("users")
+            .insert({
+              id: authUser.id,
+              email,
+              role: assignedRole,
+              name,
+              phone,
+            })
+            .select("id, email, role, name, phone")
+            .maybeSingle();
+
+          if (createdUser) {
+            userRecord = createdUser;
+          }
+        }
+      }
+    }
+  }
 
   if (error || !userRecord) return null;
 
@@ -82,11 +130,26 @@ export async function fetchCompleteProfile(userId: string): Promise<RoleAccount 
   };
 
   if (userRecord.role === "student") {
-    const { data: studentRecord } = await supabase
+    let { data: studentRecord } = await supabase
       .from("students")
       .select("*")
       .eq("user_id", userRecord.id)
-      .single();
+      .maybeSingle();
+
+    if (!studentRecord) {
+      const { data: createdStudent } = await supabase
+        .from("students")
+        .insert({
+          user_id: userRecord.id,
+          board: "",
+          standard: "",
+        })
+        .select("*")
+        .maybeSingle();
+      if (createdStudent) {
+        studentRecord = createdStudent;
+      }
+    }
 
     let subjectIds: string[] = [];
     if (studentRecord) {
@@ -110,11 +173,24 @@ export async function fetchCompleteProfile(userId: string): Promise<RoleAccount 
       subjectIds,
     } as StudentProfile;
   } else if (userRecord.role === "teacher") {
-    const { data: teacherRecord } = await supabase
+    let { data: teacherRecord } = await supabase
       .from("teachers")
       .select("*")
       .eq("user_id", userRecord.id)
-      .single();
+      .maybeSingle();
+
+    if (!teacherRecord) {
+      const { data: createdTeacher } = await supabase
+        .from("teachers")
+        .insert({
+          user_id: userRecord.id,
+        })
+        .select("*")
+        .maybeSingle();
+      if (createdTeacher) {
+        teacherRecord = createdTeacher;
+      }
+    }
 
     let subjectIds: string[] = [];
     if (teacherRecord) {
@@ -135,6 +211,31 @@ export async function fetchCompleteProfile(userId: string): Promise<RoleAccount 
       standards: ["10th", "12th"],
       subjectIds,
     } as TeacherProfile;
+  } else if (userRecord.role === "admin") {
+    let { data: adminRecord } = await supabase
+      .from("admins")
+      .select("*")
+      .eq("user_id", userRecord.id)
+      .maybeSingle();
+
+    if (!adminRecord) {
+      const { data: createdAdmin } = await supabase
+        .from("admins")
+        .insert({
+          user_id: userRecord.id,
+        })
+        .select("*")
+        .maybeSingle();
+      if (createdAdmin) {
+        adminRecord = createdAdmin;
+      }
+    }
+
+    return {
+      ...account,
+      id: adminRecord?.id || userRecord.id,
+      userId: userRecord.id,
+    } as AdminProfile;
   }
 
   return account;
@@ -161,16 +262,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<RoleAccount | null>(null);
   const [status, setStatus] = useState<SessionStatus>("loading");
 
-  // Initialize session from Supabase Auth on mount
+  // Sync session state from Supabase Auth
   useEffect(() => {
     let mounted = true;
 
-    const initializeSession = async () => {
+    const syncSession = async (authSession: any) => {
       try {
-        const {
-          data: { session: authSession },
-        } = await supabase.auth.getSession();
-
         if (authSession?.user && mounted) {
           const isEmailProvider =
             authSession.user.app_metadata?.provider === "email" ||
@@ -180,7 +277,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           );
 
           if (isEmailProvider && !isVerified) {
-            if (mounted) setStatus("unauthenticated");
+            clearCurrentUserCache();
+            if (mounted) {
+              setSession(null);
+              setStatus("unauthenticated");
+            }
             return;
           }
 
@@ -192,46 +293,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-        if (mounted) setStatus("unauthenticated");
-      } catch (err) {
-        console.error("Failed to initialize session:", err);
-        if (mounted) setStatus("unauthenticated");
-      }
-    };
-
-    initializeSession();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Listen to auth state changes
-  useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, authSession) => {
-      if (authSession?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED")) {
-        const isEmailProvider =
-          authSession.user.app_metadata?.provider === "email" ||
-          !authSession.user.app_metadata?.provider;
-        const isVerified = Boolean(
-          authSession.user.email_confirmed_at || authSession.user.confirmed_at,
-        );
-
-        if (isEmailProvider && !isVerified) {
+        if (mounted) {
           clearCurrentUserCache();
           setSession(null);
           setStatus("unauthenticated");
-          return;
         }
+      } catch (err) {
+        console.error("Session sync error:", err);
+        if (mounted) {
+          clearCurrentUserCache();
+          setSession(null);
+          setStatus("unauthenticated");
+        }
+      }
+    };
 
-        const account = await fetchCompleteProfile(authSession.user.id);
-        if (account) {
-          setCurrentUserCache(account);
-          setSession(account);
-          setStatus("authenticated");
-        }
+    // 1. Listen to all auth state changes (INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, USER_UPDATED, SIGNED_OUT)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, authSession) => {
+      if (!mounted) return;
+      if (
+        event === "INITIAL_SESSION" ||
+        event === "SIGNED_IN" ||
+        event === "TOKEN_REFRESHED" ||
+        event === "USER_UPDATED"
+      ) {
+        await syncSession(authSession);
       } else if (event === "SIGNED_OUT") {
         clearCurrentUserCache();
         setSession(null);
@@ -239,7 +327,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // 2. Immediate getSession check on initial mount
+    supabase.auth.getSession().then(({ data: { session: authSession } }) => {
+      if (!mounted) return;
+      if (authSession) {
+        syncSession(authSession);
+      } else {
+        // Allow a brief tick for Supabase local storage recovery
+        setTimeout(() => {
+          if (mounted && status === "loading") {
+            setStatus("unauthenticated");
+          }
+        }, 150);
+      }
+    });
+
     return () => {
+      mounted = false;
       subscription?.unsubscribe();
     };
   }, []);

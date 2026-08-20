@@ -115,13 +115,24 @@ export async function getCurrentUserWithRole() {
     };
   }
 
-  const { data: userRecord, error } = await supabase
+  let { data: userRecord } = await supabase
     .from("users")
     .select("id, email, role, name, phone")
     .eq("id", session.user.id)
-    .single();
+    .maybeSingle();
 
-  if (error || !userRecord) {
+  if (!userRecord && session.user.email) {
+    const { data: byEmail } = await supabase
+      .from("users")
+      .select("id, email, role, name, phone")
+      .eq("email", session.user.email.toLowerCase())
+      .maybeSingle();
+    if (byEmail) {
+      userRecord = byEmail;
+    }
+  }
+
+  if (!userRecord) {
     cachedUser = null;
     return null;
   }

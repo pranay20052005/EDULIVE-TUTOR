@@ -2,6 +2,7 @@ import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { BookLoader } from "@/components/book-loader";
 import { homeForRole, useSession } from "@/lib/session";
 
 export const Route = createFileRoute("/app")({
@@ -21,14 +22,7 @@ function StudentLayout() {
   }, [status, session, navigate]);
 
   if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <div className="size-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading your session…</p>
-        </div>
-      </div>
-    );
+    return <BookLoader fullScreen text="Loading your session…" />;
   }
 
   if (!session || session.role !== "student") {

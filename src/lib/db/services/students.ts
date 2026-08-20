@@ -33,11 +33,43 @@ export const studentService = {
       .from("students")
       .select("*, user:users(*)")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error("Error fetching student by user ID:", error);
       return null;
+    }
+
+    return data;
+  },
+
+  /**
+   * Fetch or create student by user ID
+   */
+  async getOrCreateByUserId(
+    userId: string,
+    defaults?: { board?: string; standard?: string },
+  ): Promise<Student> {
+    const existing = await this.getByUserId(userId);
+    if (existing) return existing;
+
+    const { data, error } = await supabase
+      .from("students")
+      .insert([
+        {
+          user_id: userId,
+          board: defaults?.board || "",
+          standard: defaults?.standard || "",
+        },
+      ])
+      .select("*, user:users(*)")
+      .single();
+
+    if (error) {
+      // Race condition retry
+      const retry = await this.getByUserId(userId);
+      if (retry) return retry;
+      throw new Error(`Failed to create student: ${handleDatabaseError(error)}`);
     }
 
     return data;

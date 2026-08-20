@@ -51,12 +51,32 @@ export const enrollmentService = {
    * Check if student is actively enrolled in subject
    */
   async isEnrolled(studentId: string, subjectId: string): Promise<boolean> {
+    if (!studentId || !subjectId) return false;
+
     const { count, error } = await supabase
       .from("enrollments")
       .select("id", { count: "exact", head: true })
       .eq("student_id", studentId)
       .eq("subject_id", subjectId)
       .eq("status", "active");
+
+    if ((count === 0 || count === null) && !error) {
+      const { data: studentRow } = await supabase
+        .from("students")
+        .select("id")
+        .eq("user_id", studentId)
+        .maybeSingle();
+
+      if (studentRow?.id && studentRow.id !== studentId) {
+        const retry = await supabase
+          .from("enrollments")
+          .select("id", { count: "exact", head: true })
+          .eq("student_id", studentRow.id)
+          .eq("subject_id", subjectId)
+          .eq("status", "active");
+        return (retry.count ?? 0) > 0;
+      }
+    }
 
     if (error) {
       console.error("Error checking enrollment:", error);
@@ -70,12 +90,35 @@ export const enrollmentService = {
    * Get student's enrollments
    */
   async getStudentEnrollments(studentId: string): Promise<Enrollment[]> {
+    if (!studentId) return [];
+
     const { data, error } = await supabase
       .from("enrollments")
       .select("*, subject:subjects(*, teacher:teachers(*, user:users(*)))")
       .eq("student_id", studentId)
       .eq("status", "active")
       .order("created_at", { ascending: false });
+
+    // Fallback: If no records found, studentId might be a user_id. Look up matching students.id.
+    if ((!data || data.length === 0) && !error) {
+      const { data: studentRow } = await supabase
+        .from("students")
+        .select("id")
+        .eq("user_id", studentId)
+        .maybeSingle();
+
+      if (studentRow?.id && studentRow.id !== studentId) {
+        const retry = await supabase
+          .from("enrollments")
+          .select("*, subject:subjects(*, teacher:teachers(*, user:users(*)))")
+          .eq("student_id", studentRow.id)
+          .eq("status", "active")
+          .order("created_at", { ascending: false });
+        if (retry.data && retry.data.length > 0) {
+          return retry.data;
+        }
+      }
+    }
 
     if (error) {
       console.error("Error fetching student enrollments:", error);

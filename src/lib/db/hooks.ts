@@ -471,6 +471,68 @@ export function useAllAttendance() {
 }
 
 // ============================================================
+// BATCHES & CERTIFICATES QUERIES
+// ============================================================
+
+export function useAllBatches(filter?: { subjectId?: string; standard?: string }) {
+  return useQuery({
+    queryKey: ["admin-batches", filter],
+    queryFn: () => import("@/lib/db/services/batches").then((m) => m.batchService.listAll(filter)),
+  });
+}
+
+export function useSubjectBatches(subjectId: string | undefined) {
+  return useQuery({
+    queryKey: ["subject-batches", subjectId],
+    queryFn: () =>
+      subjectId
+        ? import("@/lib/db/services/batches").then((m) => m.batchService.listBySubject(subjectId))
+        : Promise.resolve([]),
+    enabled: !!subjectId,
+  });
+}
+
+export function useTeacherBatches(teacherId: string | undefined) {
+  return useQuery({
+    queryKey: ["teacher-batches", teacherId],
+    queryFn: () =>
+      teacherId
+        ? import("@/lib/db/services/batches").then((m) => m.batchService.listByTeacher(teacherId))
+        : Promise.resolve([]),
+    enabled: !!teacherId,
+  });
+}
+
+export function useStudentCertificates(studentId: string | undefined) {
+  return useQuery({
+    queryKey: ["student-certificates", studentId],
+    queryFn: () =>
+      studentId
+        ? import("@/lib/db/services/certificates").then((m) =>
+            m.certificateService.listByStudent(studentId),
+          )
+        : Promise.resolve([]),
+    enabled: !!studentId,
+  });
+}
+
+export function useSubjectCertificate(
+  studentId: string | undefined,
+  subjectId: string | undefined,
+) {
+  return useQuery({
+    queryKey: ["subject-certificate", studentId, subjectId],
+    queryFn: () =>
+      studentId && subjectId
+        ? import("@/lib/db/services/certificates").then((m) =>
+            m.certificateService.getByStudentAndSubject(studentId, subjectId),
+          )
+        : Promise.resolve(null),
+    enabled: !!studentId && !!subjectId,
+  });
+}
+
+// ============================================================
 // MUTATIONS
 // ============================================================
 

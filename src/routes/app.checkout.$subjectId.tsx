@@ -105,19 +105,22 @@ function CheckoutPage() {
     setPaying(true);
     try {
       // 1. Resolve student record ID
-      let realStudentId = student?.id;
       const {
         data: { session: authSession },
       } = await supabase.auth.getSession();
 
-      if (authSession?.user?.id) {
-        const studentRow = await studentService.getByUserId(authSession.user.id);
+      const authUserId = authSession?.user?.id;
+      let resolvedStudentId = student?.id;
+
+      if (authUserId) {
+        const studentRow = await studentService.getByUserId(authUserId);
         if (studentRow?.id) {
-          realStudentId = studentRow.id;
+          resolvedStudentId = studentRow.id;
         }
       }
 
-      if (!realStudentId) {
+      const lookupId = resolvedStudentId || authUserId || student?.id;
+      if (!lookupId) {
         throw new Error("Student profile not found. Please log in again.");
       }
 
@@ -125,7 +128,7 @@ function CheckoutPage() {
       const order = await createPaymentOrderFn({
         data: {
           subjectId,
-          studentId: realStudentId,
+          studentId: lookupId,
         },
       });
 
@@ -134,13 +137,16 @@ function CheckoutPage() {
         await enrollFreeCourseFn({
           data: {
             subjectId,
-            studentId: realStudentId,
+            studentId: lookupId,
           },
         });
         enroll(subjectId);
         await queryClient.invalidateQueries({ queryKey: ["enrollments"] });
         await queryClient.invalidateQueries({ queryKey: ["student-enrollments"] });
+        await queryClient.invalidateQueries({ queryKey: ["student-payments"] });
         await queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
+        await queryClient.invalidateQueries({ queryKey: ["subjects"] });
+        await queryClient.refetchQueries({ queryKey: ["enrollments"] });
         setPaying(false);
         toast.success(`Enrolled in ${subject.name} for Free!`);
         navigate({ to: "/app/subjects/$subjectId", params: { subjectId } });
@@ -173,7 +179,7 @@ function CheckoutPage() {
                   paymentId: response.razorpay_payment_id,
                   signature: response.razorpay_signature,
                   subjectId,
-                  studentId: realStudentId!,
+                  studentId: lookupId,
                   paymentMethod: method.toLowerCase(),
                 },
               });
@@ -184,6 +190,8 @@ function CheckoutPage() {
                 await queryClient.invalidateQueries({ queryKey: ["student-enrollments"] });
                 await queryClient.invalidateQueries({ queryKey: ["student-payments"] });
                 await queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
+                await queryClient.invalidateQueries({ queryKey: ["subjects"] });
+                await queryClient.refetchQueries({ queryKey: ["enrollments"] });
                 setPaying(false);
                 toast.success(`Payment verified! ${subject.name} activated.`);
                 navigate({ to: "/app/subjects/$subjectId", params: { subjectId } });
@@ -226,7 +234,7 @@ function CheckoutPage() {
             paymentId: simulatedPaymentId,
             signature: simulatedSignature,
             subjectId,
-            studentId: realStudentId,
+            studentId: lookupId,
             paymentMethod: method.toLowerCase(),
           },
         });
@@ -237,6 +245,8 @@ function CheckoutPage() {
           await queryClient.invalidateQueries({ queryKey: ["student-enrollments"] });
           await queryClient.invalidateQueries({ queryKey: ["student-payments"] });
           await queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
+          await queryClient.invalidateQueries({ queryKey: ["subjects"] });
+          await queryClient.refetchQueries({ queryKey: ["enrollments"] });
           setPaying(false);
           toast.success(`Payment confirmed! ${subject.name} added to My Subjects`);
           navigate({ to: "/app/subjects/$subjectId", params: { subjectId } });
