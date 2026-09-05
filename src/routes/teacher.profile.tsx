@@ -142,7 +142,12 @@ function TeacherProfilePage() {
           <p className="truncate text-sm text-muted-foreground">
             Faculty · {teacher.qualification}
           </p>
-          <p className="truncate text-xs text-muted-foreground">{teacher.email}</p>
+          <a
+            href={`mailto:${teacher.email}`}
+            className="truncate text-xs text-muted-foreground hover:text-primary hover:underline block"
+          >
+            {teacher.email}
+          </a>
         </div>
       </div>
 

@@ -30,6 +30,7 @@ export * from "./services/payments";
 export * from "./services/subscription-plans";
 export * from "./services/batches";
 export * from "./services/certificates";
+export * from "./services/settings";
 
 // Aliases for compatibility
 export { subscriptionPlanService as subscriptionPlansService } from "./services/subscription-plans";

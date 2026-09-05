@@ -195,10 +195,29 @@ function AdminTeachers() {
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+  const isEmail = value.includes("@");
+  const isPhone = /^[+\d][\d\s-]{6,}$/.test(value.trim());
+
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
+      {isEmail ? (
+        <a
+          href={`mailto:${value}`}
+          className="font-medium text-primary hover:underline block truncate"
+        >
+          {value}
+        </a>
+      ) : isPhone ? (
+        <a
+          href={`tel:${value.replace(/[\s-]/g, "")}`}
+          className="font-medium text-primary hover:underline block truncate"
+        >
+          {value}
+        </a>
+      ) : (
+        <p className="font-medium truncate">{value}</p>
+      )}
     </div>
   );
 }

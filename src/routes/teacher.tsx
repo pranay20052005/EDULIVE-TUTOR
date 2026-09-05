@@ -4,8 +4,12 @@ import { useEffect } from "react";
 import { AppShell } from "@/components/app-shell";
 import { BookLoader } from "@/components/book-loader";
 import { homeForRole, useSession } from "@/lib/session";
+import { teacherRouteLoader } from "@/lib/route-guards";
 
 export const Route = createFileRoute("/teacher")({
+  beforeLoad: async () => {
+    await teacherRouteLoader();
+  },
   component: TeacherLayout,
 });
 

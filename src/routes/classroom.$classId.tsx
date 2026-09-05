@@ -44,22 +44,24 @@ import { supabase } from "@/lib/db/client";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/classroom/$classId")({
-  head: () => ({
-    meta: [
-      { title: "Live Classroom — EduLive" },
-      {
-        name: "description",
-        content:
-          "Join the EduLive interactive virtual classroom with live video, audio, screen sharing, collaborative whiteboard, and real-time chat.",
-      },
-      { property: "og:title", content: "Live Classroom — EduLive" },
-      {
-        property: "og:description",
-        content: "Live video class with interactive whiteboard and chat.",
-      },
-      { name: "robots", content: "noindex" },
-    ],
-  }),
+  head: ({ params }) => {
+    const title = "Live Interactive Classroom — EduLive";
+    return {
+      meta: [
+        { title },
+        {
+          name: "description",
+          content: `Join live virtual class ${params.classId} on EduLive with video, audio, collaborative whiteboard, and real-time chat.`,
+        },
+        { property: "og:title", content: title },
+        {
+          property: "og:description",
+          content: "Live video class with interactive whiteboard and chat on EduLive.",
+        },
+        { name: "robots", content: "noindex" },
+      ],
+    };
+  },
   component: ClassroomPage,
 });
 

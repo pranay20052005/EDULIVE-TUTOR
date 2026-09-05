@@ -90,7 +90,12 @@ export function AppShell({ role, children }: { role: Role; children: ReactNode }
   const { data: unread = 0 } = useUnreadNotificationCount(session?.id);
   const displayName = session?.name ?? roleLabel[role];
   const notifTo = role === "student" ? "/app/notifications" : `/${role}`;
-  const profileBase = role === "student" ? "/app/profile" : `/${role}`;
+  const profileBase =
+    role === "student"
+      ? "/app/profile"
+      : role === "teacher"
+        ? "/teacher/profile"
+        : "/admin/settings";
 
   const handleLogout = async () => {
     try {
@@ -291,7 +296,10 @@ export function AppShell({ role, children }: { role: Role; children: ReactNode }
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-        <ul className="grid grid-cols-5">
+        <ul
+          className="grid"
+          style={{ gridTemplateColumns: `repeat(${primary.length}, minmax(0, 1fr))` }}
+        >
           {primary.map((item) => (
             <li key={item.to}>
               <Link

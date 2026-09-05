@@ -120,8 +120,8 @@ async function runE2ETests() {
   if (pErr) throw new Error(`Payment failed: ${pErr.message}`);
   console.log(`✓ Payment recorded in DB (ID: ${payment.id}, Status: ${payment.status})`);
 
-  // Insert enrollment
-  const { data: enrollment, error: eErr } = await studentClient
+  // Insert enrollment (activated by server upon payment verification)
+  const { data: enrollment, error: eErr } = await adminClient
     .from("enrollments")
     .insert({
       student_id: sStudentId,

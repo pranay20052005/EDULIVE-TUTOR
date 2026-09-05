@@ -128,6 +128,13 @@ function RegisterPage() {
 
   // Send OTP
   const handleSendOtp = async () => {
+    // The Supabase OTP endpoint enforces a cooldown for each email address.
+    // Keep the guard in the handler as well as the button so keyboard/programmatic
+    // activation cannot send duplicate emails while the countdown is active.
+    if (sendingOtp || (otpSent && countdown > 0)) {
+      return;
+    }
+
     if (emailError) {
       setTouched(true);
       return;
@@ -321,13 +328,15 @@ function RegisterPage() {
                         type="button"
                         size="sm"
                         className="h-9 shrink-0 px-3 text-xs font-medium"
-                        disabled={sendingOtp || Boolean(emailError)}
+                        disabled={sendingOtp || Boolean(emailError) || (otpSent && countdown > 0)}
                         onClick={handleSendOtp}
                       >
                         {sendingOtp ? (
                           <>
                             <Loader2 className="size-3.5 animate-spin mr-1" /> Sending…
                           </>
+                        ) : otpSent && countdown > 0 ? (
+                          `Resend in ${countdown}s`
                         ) : otpSent ? (
                           "Resend OTP"
                         ) : (

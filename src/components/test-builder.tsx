@@ -369,7 +369,13 @@ export function TestBuilder({ test }: { test: FacultyTest & { questions?: TestQu
                   <Badge variant="secondary">Q{i + 1}</Badge>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => move(i, -1)} disabled={i === 0}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => move(i, -1)}
+                    disabled={i === 0}
+                    aria-label="Move question up"
+                  >
                     ↑
                   </Button>
                   <Button
@@ -377,6 +383,7 @@ export function TestBuilder({ test }: { test: FacultyTest & { questions?: TestQu
                     variant="ghost"
                     onClick={() => move(i, 1)}
                     disabled={i === questions.length - 1}
+                    aria-label="Move question down"
                   >
                     ↓
                   </Button>

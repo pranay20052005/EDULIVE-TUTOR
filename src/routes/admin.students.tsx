@@ -80,19 +80,19 @@ function AdminStudents() {
   const [standard, setStandard] = useState<string>("all");
   const [board, setBoard] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
-  const [disabled, setDisabled] = useState<Record<string, boolean>>({});
   const [detail, setDetail] = useState<Student | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<Student | null>(null);
   const [promoteTarget, setPromoteTarget] = useState<Student | null>(null);
   const [newStandard, setNewStandard] = useState<string>("10th");
   const [promoting, setPromoting] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return students.filter((s: Student) => {
       const name = s.user?.name || "";
       const email = s.user?.email || "";
-      const isDisabled = !!disabled[s.id];
+      const isDisabled = s.status === "disabled";
       if (q && !name.toLowerCase().includes(q) && !email.toLowerCase().includes(q)) return false;
       if (standard !== "all" && s.standard !== standard) return false;
       if (board !== "all" && s.board !== board) return false;
@@ -100,16 +100,27 @@ function AdminStudents() {
       if (status === "disabled" && !isDisabled) return false;
       return true;
     });
-  }, [students, query, standard, board, status, disabled]);
+  }, [students, query, standard, board, status]);
 
-  const toggleStatus = (s: Student) => {
+  const toggleStatus = async (s: Student) => {
     const name = s.user?.name || "Student";
-    setDisabled((prev: Record<string, boolean>) => {
-      const next = { ...prev, [s.id]: !prev[s.id] };
-      toast.success(next[s.id] ? `${name} disabled` : `${name} enabled`);
-      return next;
-    });
-    setConfirmTarget(null);
+    const nextStatus = s.status === "disabled" ? "active" : "disabled";
+    setUpdatingStatus(true);
+    try {
+      await studentService.update(s.id, { status: nextStatus });
+      await queryClient.invalidateQueries({ queryKey: ["admin-students"] });
+      await queryClient.invalidateQueries({ queryKey: ["students"] });
+      toast.success(nextStatus === "disabled" ? `${name} disabled` : `${name} activated`);
+      if (detail && detail.id === s.id) {
+        setDetail({ ...detail, status: nextStatus });
+      }
+    } catch (err: any) {
+      console.error("Error updating student status:", err);
+      toast.error(err.message || "Failed to update student status");
+    } finally {
+      setUpdatingStatus(false);
+      setConfirmTarget(null);
+    }
   };
 
   const getStudentEnrollments = (studentId: string) => {
@@ -148,8 +159,8 @@ function AdminStudents() {
         subtitle={`${students.length} student${students.length === 1 ? "" : "s"} registered across all standards`}
       />
 
-      <div className="surface flex flex-wrap items-center gap-3 p-4">
-        <div className="relative min-w-[200px] flex-1">
+      <div className="surface flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 p-4">
+        <div className="relative w-full sm:w-auto sm:flex-1 min-w-0">
           <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -159,42 +170,47 @@ function AdminStudents() {
             aria-label="Search students"
           />
         </div>
-        <Select value={standard} onValueChange={setStandard}>
-          <SelectTrigger className="w-[130px]" aria-label="Filter by standard">
-            <SelectValue placeholder="Standard" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All standards</SelectItem>
-            {STANDARDS.map((s: string) => (
-              <SelectItem key={s} value={s}>
-                {s}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={board} onValueChange={setBoard}>
-          <SelectTrigger className="w-[170px]" aria-label="Filter by board">
-            <SelectValue placeholder="Board" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All boards</SelectItem>
-            {BOARDS.map((b: string) => (
-              <SelectItem key={b} value={b}>
-                {b}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-[130px]" aria-label="Filter by status">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="disabled">Disabled</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+          <Select value={standard} onValueChange={setStandard}>
+            <SelectTrigger className="w-full sm:w-[130px]" aria-label="Filter by standard">
+              <SelectValue placeholder="Standard" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All standards</SelectItem>
+              {STANDARDS.map((s: string) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={board} onValueChange={setBoard}>
+            <SelectTrigger className="w-full sm:w-[170px]" aria-label="Filter by board">
+              <SelectValue placeholder="Board" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All boards</SelectItem>
+              {BOARDS.map((b: string) => (
+                <SelectItem key={b} value={b}>
+                  {b}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger
+              className="col-span-2 sm:col-span-1 w-full sm:w-[130px]"
+              aria-label="Filter by status"
+            >
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="disabled">Disabled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -218,7 +234,7 @@ function AdminStudents() {
             </TableHeader>
             <TableBody>
               {filtered.map((s: Student) => {
-                const isDisabled = !!disabled[s.id];
+                const isDisabled = s.status === "disabled";
                 const studentEnrollments = getStudentEnrollments(s.id);
                 const name = s.user?.name || "Student";
                 const email = s.user?.email || "";
@@ -397,11 +413,11 @@ function AdminStudents() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirmTarget && disabled[confirmTarget.id] ? "Enable" : "Disable"}{" "}
+              {confirmTarget && confirmTarget.status === "disabled" ? "Enable" : "Disable"}{" "}
               {confirmTarget?.user?.name || "Student"}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmTarget && disabled[confirmTarget.id]
+              {confirmTarget && confirmTarget.status === "disabled"
                 ? "This will restore the student's access to their enrolled courses."
                 : "This will immediately revoke the student's access to live classes and content."}
             </AlertDialogDescription>
@@ -419,10 +435,29 @@ function AdminStudents() {
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+  const isEmail = value.includes("@");
+  const isPhone = /^[+\d][\d\s-]{6,}$/.test(value.trim());
+
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
+      {isEmail ? (
+        <a
+          href={`mailto:${value}`}
+          className="font-medium text-primary hover:underline block truncate"
+        >
+          {value}
+        </a>
+      ) : isPhone ? (
+        <a
+          href={`tel:${value.replace(/[\s-]/g, "")}`}
+          className="font-medium text-primary hover:underline block truncate"
+        >
+          {value}
+        </a>
+      ) : (
+        <p className="font-medium truncate">{value}</p>
+      )}
     </div>
   );
 }

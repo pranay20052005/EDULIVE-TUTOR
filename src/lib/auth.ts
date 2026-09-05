@@ -15,9 +15,78 @@ export class AuthError extends Error {
 }
 
 export function authMessage(error: unknown): string {
-  if (error instanceof AuthError) return error.message;
-  if (error instanceof Error) return error.message;
-  return "Something went wrong. Please try again.";
+  if (process.env.NODE_ENV !== "production") {
+    console.error("[EduLive API/Auth Error]:", error);
+  }
+
+  let raw = "";
+  if (error instanceof AuthError) {
+    raw = error.message;
+  } else if (error instanceof Error) {
+    raw = error.message;
+  } else if (typeof error === "string") {
+    raw = error;
+  } else if (error && typeof error === "object" && "message" in error) {
+    raw = String((error as any).message);
+  } else {
+    return "Something went wrong. Please try again.";
+  }
+
+  const lower = raw.toLowerCase();
+
+  // Map known technical error patterns to friendly user feedback
+  if (lower.includes("invalid_credentials") || lower.includes("invalid login credentials")) {
+    return "Invalid email or password. Please check your credentials and try again.";
+  }
+  if (lower.includes("email not confirmed") || lower.includes("unverified")) {
+    return "Please verify your email address before signing in. Check your inbox for the OTP verification code.";
+  }
+  if (
+    lower.includes("users_email_key") ||
+    lower.includes("user already registered") ||
+    lower.includes("already exists")
+  ) {
+    return "An account with this email address already exists. Please sign in instead.";
+  }
+  if (
+    lower.includes("otp_expired") ||
+    lower.includes("token has expired") ||
+    lower.includes("token is expired")
+  ) {
+    return "The verification code has expired. Please request a new code.";
+  }
+  if (
+    lower.includes("invalid token") ||
+    lower.includes("token is invalid") ||
+    lower.includes("invalid otp")
+  ) {
+    return "The verification code is incorrect. Please check and try again.";
+  }
+  if (
+    lower.includes("rate limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("over_email_send_rate_limit")
+  ) {
+    return "Too many attempts. Please wait a moment before trying again.";
+  }
+  if (
+    lower.includes("failed to fetch") ||
+    lower.includes("network error") ||
+    lower.includes("networkrequestfailed")
+  ) {
+    return "Unable to connect to the server. Please check your internet connection.";
+  }
+  if (
+    lower.includes("pgrst") ||
+    lower.includes("postgres") ||
+    lower.includes("relation") ||
+    lower.includes("syntax error") ||
+    lower.includes("violates foreign key")
+  ) {
+    return "A temporary database error occurred. Please refresh or contact support if the issue persists.";
+  }
+
+  return raw;
 }
 
 export type OAuthProvider = "google" | "apple";
@@ -506,6 +575,16 @@ export const authApi = {
     });
 
     if (error) {
+      // A retry after a rate-limit response would send a second request immediately
+      // and extend the user's wait. Surface the original error instead.
+      const isRateLimited =
+        error.status === 429 ||
+        /rate limit|too many requests|over_email_send_rate_limit/i.test(error.message || "");
+
+      if (isRateLimited) {
+        throw new AuthError("resend_rate_limited", error.message);
+      }
+
       // Fallback attempt with signInWithOtp
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: trimmedEmail,

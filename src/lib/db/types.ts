@@ -44,6 +44,7 @@ export interface Student {
   dob?: string;
   parent_name?: string;
   parent_phone?: string;
+  status?: string;
   user?: User;
   created_at: string;
   updated_at?: string;
@@ -429,6 +430,8 @@ export interface SubscriptionPlan {
   price_inr: number;
   features?: string[]; // JSON array as JSONB
   duration_days?: number;
+  duration_months?: number;
+  is_popular?: boolean;
   plan_kind?: PlanKind;
   active?: boolean;
   is_active?: boolean;

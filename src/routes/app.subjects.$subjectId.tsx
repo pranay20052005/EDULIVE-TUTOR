@@ -45,18 +45,23 @@ import type {
 } from "@/lib/db/types";
 
 export const Route = createFileRoute("/app/subjects/$subjectId")({
-  head: () => ({
-    meta: [
-      { title: "Subject — EduLive" },
-      {
-        name: "description",
-        content:
-          "Chapters, live classes, recordings, notes, assignments and tests for this subject.",
-      },
-      { property: "og:title", content: "Subject" },
-      { property: "og:description", content: "Everything for this subject in one place." },
-    ],
-  }),
+  head: ({ params }) => {
+    const title = "Subject Workspace — EduLive";
+    return {
+      meta: [
+        { title },
+        {
+          name: "description",
+          content: `Chapters, live classes, recordings, notes, assignments, and tests for subject ID ${params.subjectId}.`,
+        },
+        { property: "og:title", content: title },
+        {
+          property: "og:description",
+          content: "All learning materials, live sessions, and progress tracking for this subject.",
+        },
+      ],
+    };
+  },
   component: SubjectDetail,
 });
 

@@ -161,7 +161,10 @@ async function run() {
   // Cleanup batch
   await pgClient.query("DELETE FROM batch_students WHERE batch_id = $1;", [testBatch.id]);
   await pgClient.query("DELETE FROM batches WHERE id = $1;", [testBatch.id]);
-  assert(true, "Batch test records cleaned up");
+  const batchCleanupCheck = await pgClient.query("SELECT 1 FROM batches WHERE id = $1;", [
+    testBatch.id,
+  ]);
+  assert(batchCleanupCheck.rowCount === 0, "Batch test records verified cleaned up");
 
   // =========================================================================
   // SECTION 3: COURSE COMPLETION & TAMPER-PROOF CERTIFICATES
@@ -198,7 +201,11 @@ async function run() {
 
   // Cleanup test certificate
   await pgClient.query("DELETE FROM course_certificates WHERE id = $1;", [testCert.id]);
-  assert(true, "Certificate test records cleaned up");
+  const certCleanupCheck = await pgClient.query(
+    "SELECT 1 FROM course_certificates WHERE id = $1;",
+    [testCert.id],
+  );
+  assert(certCleanupCheck.rowCount === 0, "Certificate test records verified cleaned up");
 
   // =========================================================================
   // SECTION 4: REALTIME LIVE CLASSROOM & WHITEBOARD & CHAT
@@ -217,6 +224,16 @@ async function run() {
   const liveClass = classRes.rows[0];
   assert(liveClass.status === "live", "Live class scheduled and activated to 'live' status");
 
+  // Ensure student 1 is enrolled in base subject
+  await pgClient.query(
+    `
+    INSERT INTO enrollments (student_id, subject_id, status, enrollment_type)
+    VALUES ($1, $2, 'active', 'free')
+    ON CONFLICT (student_id, subject_id) DO UPDATE SET status = 'active';
+  `,
+    [student1.id, baseSubject.id],
+  );
+
   // Verify classroom authorization check for student 1
   const student1AuthCheck = await pgClient.query(
     `
@@ -224,7 +241,19 @@ async function run() {
   `,
     [student1.id, baseSubject.id],
   );
-  assert(student1AuthCheck.rowCount > 0 || true, "Student classroom authorization verified");
+  assert(
+    student1AuthCheck.rowCount > 0,
+    "Active enrolled student classroom authorization verified",
+  );
+
+  // Negative test: verify non-enrolled identity is rejected
+  const nonEnrolledCheck = await pgClient.query(
+    `
+    SELECT 1 FROM enrollments WHERE student_id = $1 AND subject_id = $2 AND status = 'active';
+  `,
+    ["00000000-0000-0000-0000-000000000000", baseSubject.id],
+  );
+  assert(nonEnrolledCheck.rowCount === 0, "Non-enrolled student authorization rejected");
 
   // Test Realtime Channel Broadcast payload structures for Whiteboard and Chat
   const whiteboardStroke = {
@@ -255,7 +284,10 @@ async function run() {
 
   // Cleanup class
   await pgClient.query("DELETE FROM scheduled_classes WHERE id = $1;", [liveClass.id]);
-  assert(true, "Live class test records cleaned up");
+  const classCleanupCheck = await pgClient.query("SELECT 1 FROM scheduled_classes WHERE id = $1;", [
+    liveClass.id,
+  ]);
+  assert(classCleanupCheck.rowCount === 0, "Live class test records verified cleaned up");
 
   // =========================================================================
   // SECTION 5: PAYMENTS & RAZORPAY TEST MODE RECONCILIATION
@@ -331,7 +363,13 @@ async function run() {
   await pgClient.query("DELETE FROM enrollments WHERE id = $1;", [enrollRes.rows[0].id]);
   await pgClient.query("DELETE FROM payments WHERE id = $1;", [testPayment.id]);
   await pgClient.query("DELETE FROM subjects WHERE id = $1;", [testSubject.id]);
-  assert(true, "Payment and subject test records cleaned up");
+  const paymentCleanupCheck = await pgClient.query("SELECT 1 FROM payments WHERE id = $1;", [
+    testPayment.id,
+  ]);
+  assert(
+    paymentCleanupCheck.rowCount === 0,
+    "Payment and subject test records verified cleaned up",
+  );
 
   // =========================================================================
   // SECTION 6: TEACHER CONTENT MANAGEMENT & STORAGE AUDIT
@@ -358,8 +396,10 @@ async function run() {
   assert(!uploadError, "Uploaded study material note to Supabase Storage");
 
   // Cleanup uploaded file
-  await supabase.storage.from("materials").remove([testFilePath]);
-  assert(true, "Cleaned up temporary storage artifact");
+  const { data: removeData, error: removeErr } = await supabase.storage
+    .from("materials")
+    .remove([testFilePath]);
+  assert(!removeErr && Array.isArray(removeData), "Cleaned up temporary storage artifact verified");
 
   // =========================================================================
   // SECTION 7: STUDENT PERFORMANCE & WATCH PROGRESS
@@ -396,7 +436,10 @@ async function run() {
     testRec.id,
   ]);
   await pgClient.query("DELETE FROM recordings WHERE id = $1;", [testRec.id]);
-  assert(true, "Recording and progress test records cleaned up");
+  const recCleanupCheck = await pgClient.query("SELECT 1 FROM recordings WHERE id = $1;", [
+    testRec.id,
+  ]);
+  assert(recCleanupCheck.rowCount === 0, "Recording and progress test records verified cleaned up");
 
   // =========================================================================
   // SECTION 8: ADMIN PLATFORM MANAGEMENT & AUDITED ENROLLMENT

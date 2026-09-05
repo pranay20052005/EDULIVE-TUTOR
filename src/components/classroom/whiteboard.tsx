@@ -1,24 +1,16 @@
-import {
-  Circle,
-  Download,
-  Eraser,
-  Highlighter,
-  Minus,
-  MoveRight,
-  Pencil,
-  RotateCcw,
-  RotateCw,
-  Square,
-  Trash2,
-  Type,
-} from "lucide-react";
-import React, { useEffect, useRef, useState } from "react";
+import { Circle, Download, Eraser, Highlighter, Minus, Pencil, Square, Trash2 } from "lucide-react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/db/client";
 import { cn } from "@/lib/utils";
 
-type ToolType = "pen" | "highlighter" | "eraser" | "line" | "arrow" | "rect" | "circle" | "text";
+type ToolType = "pen" | "highlighter" | "eraser" | "line" | "rect" | "circle";
+
+type CanvasEvent =
+  | React.PointerEvent<HTMLCanvasElement>
+  | React.MouseEvent<HTMLCanvasElement>
+  | React.TouchEvent<HTMLCanvasElement>;
 
 interface WhiteboardProps {
   classId: string;
@@ -38,6 +30,8 @@ const STROKES = [
 export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: WhiteboardProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const channelRef = useRef<any>(null);
 
   const [tool, setTool] = useState<ToolType>("pen");
   const [color, setColor] = useState("#ffffff");
@@ -45,29 +39,37 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
   const [snapshot, setSnapshot] = useState<ImageData | null>(null);
-  const [history, setHistory] = useState<ImageData[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
   const [allowStudentDraw, setAllowStudentDraw] = useState(true);
+
+  // Throttled point buffer for realtime stroke broadcasting
+  const pendingStrokeBuffer = useRef<
+    Array<{ from: { x: number; y: number }; to: { x: number; y: number } }>
+  >([]);
+  const flushTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const userCanDraw = isTeacher || (canDraw && allowStudentDraw);
 
-  // Resize canvas to fill parent container cleanly
-  const resizeCanvas = () => {
+  // Synchronize offscreen buffer & resize canvas properly
+  const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
 
     const rect = container.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
     const dpr = window.devicePixelRatio || 1;
 
-    // Save previous content if any
-    const ctx = canvas.getContext("2d");
-    let prevData: ImageData | null = null;
-    if (ctx && canvas.width > 0 && canvas.height > 0) {
-      try {
-        prevData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      } catch (e) {
-        // ignore on clean canvas
+    // Preserve existing drawing onto offscreen canvas before resizing
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement("canvas");
+    }
+    const offscreen = offscreenCanvasRef.current;
+    if (canvas.width > 0 && canvas.height > 0) {
+      offscreen.width = canvas.width;
+      offscreen.height = canvas.height;
+      const offCtx = offscreen.getContext("2d");
+      if (offCtx) {
+        offCtx.drawImage(canvas, 0, 0);
       }
     }
 
@@ -76,30 +78,56 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
 
+    const ctx = canvas.getContext("2d");
     if (ctx) {
-      ctx.scale(dpr, dpr);
       ctx.fillStyle = "#0f172a";
-      ctx.fillRect(0, 0, rect.width, rect.height);
-      if (prevData) {
-        ctx.putImageData(prevData, 0, 0);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (offscreen.width > 0 && offscreen.height > 0) {
+        ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
       }
+      ctx.scale(dpr, dpr);
     }
-  };
+  }, []);
 
   useEffect(() => {
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
     return () => window.removeEventListener("resize", resizeCanvas);
-  }, []);
+  }, [resizeCanvas]);
+
+  // Flush batched stroke coordinates to avoid Supabase Realtime rate-limit saturation
+  const flushStrokeBuffer = useCallback(() => {
+    if (!channelRef.current || pendingStrokeBuffer.current.length === 0) return;
+    const segments = [...pendingStrokeBuffer.current];
+    pendingStrokeBuffer.current = [];
+
+    channelRef.current.send({
+      type: "broadcast",
+      event: "draw_action",
+      payload: {
+        action: "batch_stroke",
+        tool,
+        color: tool === "eraser" ? "#0f172a" : color,
+        width:
+          tool === "eraser"
+            ? strokeWidth * 3
+            : tool === "highlighter"
+              ? strokeWidth * 2
+              : strokeWidth,
+        segments,
+      },
+    });
+  }, [tool, color, strokeWidth]);
 
   // Supabase Realtime synchronization for Whiteboard
   useEffect(() => {
     if (!classId) return;
 
     const channel = supabase.channel(`classroom:${classId}:whiteboard`);
+    channelRef.current = channel;
 
     channel
-      .on("broadcast", { event: "draw_action" }, ({ payload }) => {
+      .on("broadcast", { event: "draw_action" }, ({ payload }: { payload: any }) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
@@ -108,10 +136,13 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
         if (payload.action === "clear") {
           const rect = containerRef.current?.getBoundingClientRect();
           if (rect) {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = "#0f172a";
-            ctx.fillRect(0, 0, rect.width, rect.height);
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
           }
-        } else if (payload.action === "stroke") {
+        } else if (payload.action === "batch_stroke" || payload.action === "stroke") {
           ctx.save();
           ctx.strokeStyle = payload.color;
           ctx.lineWidth = payload.width;
@@ -121,10 +152,19 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             ctx.globalAlpha = 0.35;
           }
 
-          ctx.beginPath();
-          ctx.moveTo(payload.from.x, payload.from.y);
-          ctx.lineTo(payload.to.x, payload.to.y);
-          ctx.stroke();
+          if (payload.action === "batch_stroke" && Array.isArray(payload.segments)) {
+            payload.segments.forEach((seg: any) => {
+              ctx.beginPath();
+              ctx.moveTo(seg.from.x, seg.from.y);
+              ctx.lineTo(seg.to.x, seg.to.y);
+              ctx.stroke();
+            });
+          } else if (payload.from && payload.to) {
+            ctx.beginPath();
+            ctx.moveTo(payload.from.x, payload.from.y);
+            ctx.lineTo(payload.to.x, payload.to.y);
+            ctx.stroke();
+          }
           ctx.restore();
         } else if (payload.action === "shape") {
           ctx.save();
@@ -139,7 +179,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             ctx.beginPath();
             ctx.arc(payload.cx, payload.cy, payload.radius, 0, 2 * Math.PI);
             ctx.stroke();
-          } else if (payload.shape === "line" || payload.shape === "arrow") {
+          } else if (payload.shape === "line") {
             ctx.moveTo(payload.x1, payload.y1);
             ctx.lineTo(payload.x2, payload.y2);
             ctx.stroke();
@@ -157,30 +197,46 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
       .subscribe();
 
     return () => {
+      if (flushTimeoutRef.current) clearTimeout(flushTimeoutRef.current);
       supabase.removeChannel(channel);
+      channelRef.current = null;
     };
   }, [classId]);
 
   const broadcastAction = (payload: any) => {
-    const channel = supabase.channel(`classroom:${classId}:whiteboard`);
-    channel.send({
-      type: "broadcast",
-      event: "draw_action",
-      payload,
-    });
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "draw_action",
+        payload,
+      });
+    }
   };
 
-  const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCanvasCoords = (e: CanvasEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
+
+    if ("touches" in e && e.touches.length > 0) {
+      const touch = e.touches[0]!;
+      return {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top,
+      };
+    }
+
+    if ("clientX" in e) {
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+    }
+
+    return { x: 0, y: 0 };
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const startDrawing = (e: CanvasEvent) => {
     if (!userCanDraw) {
       toast.info("Whiteboard is in view-only mode for students");
       return;
@@ -190,13 +246,21 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
 
+    if ("pointerId" in e) {
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+    }
+
     const pos = getCanvasCoords(e);
     setIsDrawing(true);
     setStartPos(pos);
 
     try {
       setSnapshot(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    } catch (err) {
+    } catch {
       // ignore
     }
 
@@ -206,7 +270,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
     }
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const draw = (e: CanvasEvent) => {
     if (!isDrawing || !userCanDraw) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
@@ -234,23 +298,18 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
       ctx.lineTo(currentPos.x, currentPos.y);
       ctx.stroke();
 
-      broadcastAction({
-        action: "stroke",
-        tool,
-        color: tool === "eraser" ? "#0f172a" : color,
-        width:
-          tool === "eraser"
-            ? strokeWidth * 3
-            : tool === "highlighter"
-              ? strokeWidth * 2
-              : strokeWidth,
-        from: startPos,
-        to: currentPos,
-      });
+      // Buffer stroke segments and batch flush every 40ms to stay within Realtime rate limits
+      pendingStrokeBuffer.current.push({ from: startPos, to: currentPos });
+
+      if (!flushTimeoutRef.current) {
+        flushTimeoutRef.current = setTimeout(() => {
+          flushStrokeBuffer();
+          flushTimeoutRef.current = null;
+        }, 40);
+      }
 
       setStartPos(currentPos);
     } else if (snapshot) {
-      // Shape preview: restore clean snapshot first
       ctx.putImageData(snapshot, 0, 0);
       ctx.beginPath();
 
@@ -273,15 +332,32 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
     ctx.restore();
   };
 
-  const stopDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const stopDrawing = (e?: CanvasEvent) => {
     if (!isDrawing) return;
     setIsDrawing(false);
+
+    if (e && "pointerId" in e) {
+      try {
+        if (canvasRef.current?.hasPointerCapture(e.pointerId)) {
+          canvasRef.current.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || !startPos) return;
 
-    const endPos = getCanvasCoords(e);
+    const endPos = e ? getCanvasCoords(e) : startPos;
+
+    // Flush any pending strokes immediately
+    if (flushTimeoutRef.current) {
+      clearTimeout(flushTimeoutRef.current);
+      flushTimeoutRef.current = null;
+    }
+    flushStrokeBuffer();
 
     if (tool === "rect" || tool === "circle" || tool === "line") {
       const shapePayload: any = { action: "shape", color, width: strokeWidth };
@@ -318,9 +394,11 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || !container) return;
 
-    const rect = container.getBoundingClientRect();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#0f172a";
-    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
     broadcastAction({ action: "clear" });
     toast.success("Whiteboard cleared");
@@ -347,14 +425,15 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
   return (
     <div className="flex flex-col h-full rounded-2xl border border-white/10 bg-slate-900 overflow-hidden select-none">
       {/* Whiteboard Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-slate-950/80 p-2.5">
+      <div className="flex max-w-full flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-slate-950/80 p-2 sm:p-2.5 overflow-x-auto">
         {/* Tools */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           <Button
             size="sm"
             variant={tool === "pen" ? "default" : "ghost"}
             className="h-8 px-2 text-xs"
             onClick={() => setTool("pen")}
+            aria-label="Select pen tool"
             title="Pen"
           >
             <Pencil className="size-3.5 mr-1" /> Pen
@@ -364,6 +443,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             variant={tool === "highlighter" ? "default" : "ghost"}
             className="h-8 px-2 text-xs"
             onClick={() => setTool("highlighter")}
+            aria-label="Select highlighter marker tool"
             title="Highlighter"
           >
             <Highlighter className="size-3.5 mr-1" /> Marker
@@ -373,6 +453,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             variant={tool === "eraser" ? "default" : "ghost"}
             className="h-8 px-2 text-xs"
             onClick={() => setTool("eraser")}
+            aria-label="Select eraser tool"
             title="Eraser"
           >
             <Eraser className="size-3.5 mr-1" /> Eraser
@@ -382,6 +463,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             variant={tool === "rect" ? "default" : "ghost"}
             className="h-8 px-2 text-xs"
             onClick={() => setTool("rect")}
+            aria-label="Select rectangle shape tool"
             title="Rectangle"
           >
             <Square className="size-3.5 mr-1" /> Rect
@@ -391,6 +473,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             variant={tool === "circle" ? "default" : "ghost"}
             className="h-8 px-2 text-xs"
             onClick={() => setTool("circle")}
+            aria-label="Select circle shape tool"
             title="Circle"
           >
             <Circle className="size-3.5 mr-1" /> Circle
@@ -400,6 +483,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             variant={tool === "line" ? "default" : "ghost"}
             className="h-8 px-2 text-xs"
             onClick={() => setTool("line")}
+            aria-label="Select line shape tool"
             title="Line"
           >
             <Minus className="size-3.5 mr-1" /> Line
@@ -407,21 +491,26 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
         </div>
 
         {/* Color Palette & Stroke */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             {COLORS.map((c) => (
               <button
                 key={c}
                 type="button"
-                className={cn(
-                  "size-5 rounded-full border border-white/20 transition-transform",
-                  color === c
-                    ? "scale-125 ring-2 ring-primary ring-offset-1 ring-offset-slate-900"
-                    : "hover:scale-110",
-                )}
-                style={{ backgroundColor: c }}
+                aria-label={`Select color ${c}`}
+                className="flex size-8 items-center justify-center rounded-full transition-transform hover:scale-110 focus:outline-none"
                 onClick={() => setColor(c)}
-              />
+              >
+                <span
+                  className={cn(
+                    "size-4 rounded-full border border-white/20 transition-transform",
+                    color === c
+                      ? "scale-125 ring-2 ring-primary ring-offset-1 ring-offset-slate-900"
+                      : "",
+                  )}
+                  style={{ backgroundColor: c }}
+                />
+              </button>
             ))}
           </div>
 
@@ -430,6 +519,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
               <button
                 key={s.width}
                 type="button"
+                aria-label={`Set stroke width ${s.label}`}
                 onClick={() => setStrokeWidth(s.width)}
                 className={cn(
                   "rounded px-1.5 py-0.5 text-[10px] transition-colors",
@@ -445,13 +535,18 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
         </div>
 
         {/* Actions & Teacher Controls */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {isTeacher ? (
             <Button
               size="sm"
               variant="outline"
               className="h-8 px-2 text-xs"
               onClick={toggleStudentDraw}
+              aria-label={
+                allowStudentDraw
+                  ? "Lock whiteboard for students"
+                  : "Allow students to draw on whiteboard"
+              }
             >
               {allowStudentDraw ? "Lock for Students" : "Allow Student Draw"}
             </Button>
@@ -461,6 +556,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             variant="ghost"
             className="h-8 px-2 text-xs text-destructive hover:bg-destructive/10"
             onClick={clearBoard}
+            aria-label="Clear whiteboard canvas"
             title="Clear canvas"
           >
             <Trash2 className="size-3.5 mr-1" /> Clear
@@ -470,6 +566,7 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
             variant="ghost"
             className="h-8 px-2 text-xs"
             onClick={downloadBoard}
+            aria-label="Export whiteboard as PNG"
             title="Export PNG"
           >
             <Download className="size-3.5 mr-1" /> Save
@@ -477,18 +574,23 @@ export function CollaborativeWhiteboard({ classId, isTeacher, canDraw = true }: 
         </div>
       </div>
 
-      {/* Canvas Area */}
+      {/* Canvas Area with touch-action: none for mobile, stylus, and touch tablets */}
       <div
         ref={containerRef}
-        className="relative flex-1 w-full h-full min-h-[460px] bg-slate-950 cursor-crosshair"
+        className="relative flex-1 w-full h-full min-h-[460px] bg-slate-950 cursor-crosshair touch-none overflow-hidden"
       >
         <canvas
           ref={canvasRef}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
-          className="absolute inset-0 block w-full h-full"
+          onPointerDown={startDrawing}
+          onPointerMove={draw}
+          onPointerUp={stopDrawing}
+          onPointerCancel={stopDrawing}
+          onPointerLeave={stopDrawing}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
+          onTouchCancel={stopDrawing}
+          className="absolute inset-0 block w-full h-full touch-none"
         />
       </div>
     </div>

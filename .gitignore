@@ -35,4 +35,8 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Temporary audit and test results
+scripts/*-results.json
+*-results.json
+
 

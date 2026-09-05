@@ -71,7 +71,9 @@ async function run() {
     .single();
 
   console.log(`Teacher: ${teacherUser.name} (User: ${teacherUser.id}, Teacher: ${teacherRow.id})`);
-  console.log(`Student 1: ${studentUser1.name} (User: ${studentUser1.id}, Student: ${student1Row.id})`);
+  console.log(
+    `Student 1: ${studentUser1.name} (User: ${studentUser1.id}, Student: ${student1Row.id})`,
+  );
 
   // Create a dedicated test subject
   const testSubCode = `TEST_PAY_${Date.now()}`;
@@ -154,8 +156,14 @@ async function run() {
     .single();
 
   assert(!payInsErr && pendingPayment, "Pending payment recorded with authentic student_id");
-  assert(pendingPayment.student_id === student1Row.id, "payment.student_id references authentic students(id)");
-  assert(Number(pendingPayment.amount_inr) === 1770, "Authentic price ₹1770 (₹1500 + 18% GST) recorded");
+  assert(
+    pendingPayment.student_id === student1Row.id,
+    "payment.student_id references authentic students(id)",
+  );
+  assert(
+    Number(pendingPayment.amount_inr) === 1770,
+    "Authentic price ₹1770 (₹1500 + 18% GST) recorded",
+  );
 
   // Test 1.5: Cryptographic signature verification and enrollment activation
   const testPaymentId = `pay_real_test_${Date.now()}`;
@@ -185,7 +193,10 @@ async function run() {
     .select()
     .single();
 
-  assert(!payUpdateErr && paidPayment.status === "paid", "Payment status transitioned from 'pending' -> 'paid'");
+  assert(
+    !payUpdateErr && paidPayment.status === "paid",
+    "Payment status transitioned from 'pending' -> 'paid'",
+  );
 
   // Activate enrollment in database with authentic student_id
   const expiresAt = new Date();
@@ -210,10 +221,19 @@ async function run() {
     .select()
     .single();
 
-  assert(!enrollErr && activatedEnrollment, "Enrollment activated successfully without foreign key violation");
-  assert(activatedEnrollment.student_id === student1Row.id, `enrollment.student_id (${activatedEnrollment.student_id}) references authentic students(id)`);
+  assert(
+    !enrollErr && activatedEnrollment,
+    "Enrollment activated successfully without foreign key violation",
+  );
+  assert(
+    activatedEnrollment.student_id === student1Row.id,
+    `enrollment.student_id (${activatedEnrollment.student_id}) references authentic students(id)`,
+  );
   assert(activatedEnrollment.status === "active", "enrollment.status is 'active'");
-  assert(activatedEnrollment.payment_id === paidPayment.id, "enrollment.payment_id links to payment record");
+  assert(
+    activatedEnrollment.payment_id === paidPayment.id,
+    "enrollment.payment_id links to payment record",
+  );
 
   // Test 1.6: Duplicate purchase prevention
   const { data: existingActive } = await supabase
@@ -262,7 +282,10 @@ async function run() {
     .select()
     .single();
 
-  assert(!freeEnrollErr && freeEnroll, "Free course enrollment activated with authentic student_id");
+  assert(
+    !freeEnrollErr && freeEnroll,
+    "Free course enrollment activated with authentic student_id",
+  );
   assert(freeEnroll.enrollment_type === "free", "Free enrollment has enrollment_type 'free'");
 
   // Clean up free subject and enrollment
@@ -298,7 +321,10 @@ async function run() {
     .single();
 
   assert(!classErr && scheduledClass, "Scheduled class created in database");
-  assert(scheduledClass.meeting_url === testMeetUrl, "scheduled_classes.meeting_url accurately stored Google Meet link");
+  assert(
+    scheduledClass.meeting_url === testMeetUrl,
+    "scheduled_classes.meeting_url accurately stored Google Meet link",
+  );
 
   // Transition to 'live'
   const { data: liveClass } = await supabase
@@ -315,17 +341,20 @@ async function run() {
   const todayStr = new Date().toISOString().slice(0, 10);
   const { data: attRecord, error: attErr } = await supabase
     .from("attendance")
-    .upsert([
-      {
-        student_id: student1Row.id,
-        subject_id: testSubject.id,
-        teacher_id: teacherRow.id,
-        attendance_date: todayStr,
-        status: "present",
-        session: "Quantum Superposition & Entanglement",
-        notes: `Attended Google Meet live class: ${liveClass.title}`,
-      },
-    ], { onConflict: "student_id,subject_id,attendance_date,session" })
+    .upsert(
+      [
+        {
+          student_id: student1Row.id,
+          subject_id: testSubject.id,
+          teacher_id: teacherRow.id,
+          attendance_date: todayStr,
+          status: "present",
+          session: "Quantum Superposition & Entanglement",
+          notes: `Attended Google Meet live class: ${liveClass.title}`,
+        },
+      ],
+      { onConflict: "student_id,subject_id,attendance_date,session" },
+    )
     .select()
     .single();
 

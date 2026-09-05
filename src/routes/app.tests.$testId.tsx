@@ -1,6 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { CheckCircle2, Clock, Lock, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CheckCircle2, Clock, Lock, XCircle, Loader2 } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -19,69 +19,95 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { dateTimeOf } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { testService, testAttemptService, testAnswerService } from "@/lib/db";
-import type { TestQuestion } from "@/lib/db/types";
+import { supabase } from "@/lib/db/client";
+import { getStudentTestFn, submitTestAttemptFn } from "@/lib/server/test-functions";
+import type { StudentSanitizedQuestion, SubmitTestResult } from "@/lib/server/test-functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/tests/$testId")({
-  head: () => ({
-    meta: [
-      { title: "Attempt test — EduLive" },
-      { name: "description", content: "Attempt this timed test and get instant evaluation." },
-      { property: "og:title", content: "Attempt test — EduLive" },
-      { property: "og:description", content: "Timed test with instant results and answer review." },
-    ],
-  }),
+  head: ({ params }) => {
+    const title = "Attempt Test — EduLive";
+    return {
+      meta: [
+        { title },
+        {
+          name: "description",
+          content: `Attempt timed test ${params.testId} on EduLive with instant server-side evaluation and analytics.`,
+        },
+        { property: "og:title", content: title },
+        {
+          property: "og:description",
+          content:
+            "Timed mock test with server-side grading, answer key review, and instant results.",
+        },
+      ],
+    };
+  },
   component: TestRunner,
 });
-
-function isCorrect(q: TestQuestion, answer: string | undefined): boolean {
-  if (answer == null || answer === "") return false;
-  if (q.type === "short") {
-    return (
-      answer.trim().toLowerCase() ===
-      String(q.correct_answer_index ?? "")
-        .trim()
-        .toLowerCase()
-    );
-  }
-  return String(q.correct_answer_index) === String(answer);
-}
 
 function TestRunner() {
   const { testId } = Route.useParams();
   const { student, isEnrolled } = useSession();
   const queryClient = useQueryClient();
 
-  const { data: test, isLoading: testLoading } = useQuery({
-    queryKey: ["test-with-questions", testId],
-    queryFn: () => testService.getWithQuestions(testId),
-    enabled: !!testId,
+  const studentLookupId = student?.id || student?.userId || "";
+
+  // Secure test retrieval with answers stripped on the server
+  const {
+    data: testData,
+    isLoading: testLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["student-test", testId, studentLookupId],
+    queryFn: async () => {
+      if (!testId || !studentLookupId) return null;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      return getStudentTestFn({
+        data: {
+          testId,
+          studentId: studentLookupId,
+          authToken: session?.access_token,
+        },
+      });
+    },
+    enabled: !!testId && !!studentLookupId,
   });
 
-  const { data: previousAttempt, isLoading: attemptLoading } = useQuery({
-    queryKey: ["test-attempt", testId, student?.id],
-    queryFn: () => (student?.id ? testAttemptService.getStudentAttempt(testId, student.id) : null),
-    enabled: !!testId && !!student?.id,
-  });
+  const test = testData?.test;
+  const questions = useMemo(() => testData?.questions || [], [testData?.questions]);
+  const existingAttempt = testData?.existingAttempt;
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [current, setCurrent] = useState(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<SubmitTestResult | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (test && !secondsLeft && !previousAttempt && !result) {
+    if (test && !secondsLeft && !existingAttempt && !result) {
       setSecondsLeft((test.duration_min || 30) * 60);
     }
-  }, [test, secondsLeft, previousAttempt, result]);
+  }, [test, secondsLeft, existingAttempt, result]);
 
   useEffect(() => {
-    if (previousAttempt) {
-      setResult(previousAttempt);
+    if (existingAttempt && !result) {
+      setResult({
+        attemptId: existingAttempt.id,
+        score: existingAttempt.score ?? existingAttempt.marks_obtained ?? 0,
+        totalMarks: existingAttempt.total_marks || test?.total_marks || 100,
+        percentage: Number(existingAttempt.percentage) || 0,
+        correctCount: 0,
+        totalQuestions: questions.length,
+        status: existingAttempt.status || "graded",
+        submittedAt: existingAttempt.submitted_at || existingAttempt.created_at,
+        questionResults: [],
+      });
     }
-  }, [previousAttempt]);
+  }, [existingAttempt, result, test, questions]);
 
   useEffect(() => {
     if (result || !test) return;
@@ -89,101 +115,71 @@ function TestRunner() {
     return () => clearInterval(id);
   }, [result, test]);
 
+  // Server-side authoritative grading
   const finalize = async () => {
-    if (!test || !student?.id) return;
-    let score = 0;
-    let correctCount = 0;
-    const questions = test.questions || [];
-
-    questions.forEach((q) => {
-      if (isCorrect(q, answers[q.id])) {
-        score += q.marks || 1;
-        correctCount += 1;
-      }
-    });
+    if (!test || !studentLookupId || submitting) return;
+    setSubmitting(true);
 
     try {
-      // Create and submit attempt in database
-      const attempt = await testAttemptService.createAttempt({
-        test_id: test.id,
-        student_id: student.id,
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const evaluation = await submitTestAttemptFn({
+        data: {
+          testId: test.id,
+          studentId: studentLookupId,
+          answers,
+          authToken: session?.access_token,
+        },
       });
 
-      if (attempt?.id) {
-        // Save answers
-        await Promise.all(
-          questions.map((q) =>
-            testAnswerService.submitAnswer({
-              attempt_id: attempt.id,
-              question_id: q.id,
-              selected_answer: answers[q.id] || "",
-              selected_answer_index: answers[q.id] ? Number(answers[q.id]) : undefined,
-            }),
-          ),
-        );
-
-        // Submit final attempt
-        const submitted = await testAttemptService.submitAttempt(
-          attempt.id,
-          score,
-          test.total_marks || 100,
-        );
-
-        setResult({
-          ...submitted,
-          score,
-          correct: correctCount,
-          total_questions: questions.length,
-          answers,
-        });
-      } else {
-        setResult({
-          score,
-          total_marks: test.total_marks,
-          correct: correctCount,
-          total_questions: questions.length,
-          answers,
-        });
-      }
-
+      setResult(evaluation);
+      queryClient.invalidateQueries({ queryKey: ["student-test", testId] });
       queryClient.invalidateQueries({ queryKey: ["test-attempt", testId] });
       queryClient.invalidateQueries({ queryKey: ["test-attempts"] });
-      toast.success("Test submitted successfully");
-    } catch (err) {
-      console.error("Error submitting test to database:", err);
-      setResult({
-        score,
-        total_marks: test.total_marks,
-        correct: correctCount,
-        total_questions: questions.length,
-        answers,
-      });
-      toast.success("Test submitted successfully");
+      toast.success("Test submitted & evaluated successfully!");
+    } catch (err: any) {
+      console.error("Error submitting test:", err);
+      toast.error(err.message || "Failed to submit test. Please try again.");
+    } finally {
+      setSubmitting(false);
+      setConfirmOpen(false);
     }
   };
 
   useEffect(() => {
-    if (!result && test && secondsLeft === 0) {
+    if (!result && test && secondsLeft === 0 && questions.length > 0) {
       finalize();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [secondsLeft, result, test]);
+  }, [secondsLeft, result, test, questions]);
 
-  if (testLoading || attemptLoading) {
+  if (testLoading) {
     return (
       <div className="space-y-6">
         <PageHeader title="Loading test…" />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="size-8 animate-spin text-primary" />
+        </div>
       </div>
     );
   }
 
-  if (!test) {
+  if (isError || !test) {
     return (
-      <EmptyState
-        icon={Lock}
-        title="Test not found"
-        body="This test could not be found or has not been published yet."
-      />
+      <div className="space-y-6">
+        <EmptyState
+          icon={Lock}
+          title="Test not found or access restricted"
+          body="This test could not be found or you may not be actively enrolled in its subject."
+          action={
+            <Button asChild>
+              <Link to="/app/courses">Browse courses</Link>
+            </Button>
+          }
+        />
+      </div>
     );
   }
 
@@ -227,68 +223,70 @@ function TestRunner() {
     );
   }
 
-  const questions = test.questions || [];
-
   if (result) {
-    const scoreVal = result.marks_obtained ?? result.score ?? 0;
-    const totalMarks = test.total_marks || 100;
-    const pct = Math.round((scoreVal / totalMarks) * 100);
-    const correctVal = result.correct ?? Math.round((scoreVal / totalMarks) * questions.length);
+    const scoreVal = result.score ?? 0;
+    const totalMarks = result.totalMarks || test.total_marks || 100;
+    const pct = result.percentage ?? Math.round((scoreVal / totalMarks) * 100);
+    const passingMarks = test.passing_marks || Math.round(totalMarks * 0.4);
+    const isPassed = scoreVal >= passingMarks;
 
     return (
       <div className="space-y-6">
-        <PageHeader title="Test submitted" subtitle={test.title} />
+        <PageHeader title="Test Results & Evaluation" subtitle={test.title} />
         <div className="surface p-6 text-center">
-          <p className="text-sm text-muted-foreground">Your score</p>
+          <p className="text-sm text-muted-foreground">Your score (Evaluated Server-Side)</p>
           <p className="mt-1 text-5xl font-semibold">
             {scoreVal}
             <span className="text-xl text-muted-foreground">/{totalMarks}</span>
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {pct}% · {correctVal} correct · {questions.length - correctVal} wrong ·{" "}
-            {pct >= Math.round(((test.passing_marks || 40) / totalMarks) * 100)
-              ? "Passed"
-              : "Not passed"}
+            {pct}% · {result.correctCount} correct of {result.totalQuestions || questions.length}{" "}
+            questions ·{" "}
+            <span className={cn("font-semibold", isPassed ? "text-success" : "text-destructive")}>
+              {isPassed ? "Passed" : "Not passed"}
+            </span>
           </p>
           <Button asChild className="mt-5">
             <Link to="/app/tests">Back to tests</Link>
           </Button>
         </div>
-        <div className="space-y-3">
-          {questions.map((q: TestQuestion, i: number) => {
-            const chosen = answers[q.id];
-            const ok = isCorrect(q, chosen);
-            const options: string[] = Array.isArray(q.options) ? q.options : [];
 
-            return (
-              <div key={q.id} className="surface p-4">
+        {/* Detailed Question Review if available */}
+        {result.questionResults && result.questionResults.length > 0 ? (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-foreground px-1">Answer Breakdown</h3>
+            {result.questionResults.map((qr, i) => (
+              <div key={qr.questionId} className="surface p-4">
                 <div className="flex items-start gap-2">
-                  {ok ? (
+                  {qr.isCorrect ? (
                     <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
                   ) : (
                     <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
                   )}
-                  <p className="text-sm font-medium">
-                    {i + 1}. {q.text}
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">
+                      {i + 1}. {qr.questionText}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Your answer:{" "}
+                      <span
+                        className={cn(
+                          "font-medium",
+                          qr.isCorrect ? "text-success" : "text-destructive",
+                        )}
+                      >
+                        {qr.studentAnswer || "Not answered"}
+                      </span>{" "}
+                      · Correct answer:{" "}
+                      <span className="font-medium text-foreground">{qr.correctAnswer}</span> ·
+                      Marks: {qr.marksAwarded}/{qr.maxMarks}
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-2 pl-6 text-xs text-muted-foreground">
-                  Your answer:{" "}
-                  {chosen != null && chosen !== ""
-                    ? q.type === "short"
-                      ? chosen
-                      : (options[Number(chosen)] ?? chosen)
-                    : "Not answered"}{" "}
-                  · Correct:{" "}
-                  {q.type === "short"
-                    ? String(q.correct_answer_index ?? "")
-                    : (options[Number(q.correct_answer_index)] ??
-                      String(q.correct_answer_index ?? ""))}
-                </p>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -372,7 +370,9 @@ function TestRunner() {
             {current < questions.length - 1 ? (
               <Button onClick={() => setCurrent((c) => c + 1)}>Next</Button>
             ) : (
-              <Button onClick={() => setConfirmOpen(true)}>Submit test</Button>
+              <Button onClick={() => setConfirmOpen(true)} disabled={submitting}>
+                {submitting ? "Submitting…" : "Submit test"}
+              </Button>
             )}
           </div>
         </div>
@@ -400,8 +400,13 @@ function TestRunner() {
               </button>
             ))}
           </div>
-          <Button className="mt-4 w-full" variant="outline" onClick={() => setConfirmOpen(true)}>
-            Submit test
+          <Button
+            className="mt-4 w-full"
+            variant="outline"
+            onClick={() => setConfirmOpen(true)}
+            disabled={submitting}
+          >
+            {submitting ? "Submitting…" : "Submit test"}
           </Button>
         </aside>
       </div>
@@ -411,13 +416,15 @@ function TestRunner() {
           <AlertDialogHeader>
             <AlertDialogTitle>Submit this test?</AlertDialogTitle>
             <AlertDialogDescription>
-              You've answered {answeredCount} of {questions.length} questions. Once submitted, you
-              cannot change your answers.
+              You've answered {answeredCount} of {questions.length} questions. Once submitted, your
+              answers will be evaluated authoritatively on the server.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep reviewing</AlertDialogCancel>
-            <AlertDialogAction onClick={finalize}>Submit</AlertDialogAction>
+            <AlertDialogCancel disabled={submitting}>Keep reviewing</AlertDialogCancel>
+            <AlertDialogAction onClick={finalize} disabled={submitting}>
+              {submitting ? "Evaluating…" : "Submit"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

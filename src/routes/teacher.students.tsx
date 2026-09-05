@@ -221,15 +221,44 @@ function TeacherStudents() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Email</p>
-                    <p className="truncate font-medium">{selected.email}</p>
+                    {selected.email ? (
+                      <a
+                        href={`mailto:${selected.email}`}
+                        className="truncate font-medium text-primary hover:underline block"
+                      >
+                        {selected.email}
+                      </a>
+                    ) : (
+                      <p className="truncate font-medium">—</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Phone</p>
-                    <p className="font-medium">{selected.phone || "—"}</p>
+                    {selected.phone ? (
+                      <a
+                        href={`tel:${selected.phone.replace(/[\s-]/g, "")}`}
+                        className="font-medium text-primary hover:underline block"
+                      >
+                        {selected.phone}
+                      </a>
+                    ) : (
+                      <p className="font-medium">—</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Parent</p>
-                    <p className="font-medium">{selected.parentName || "—"}</p>
+                    {selected.parentPhone ? (
+                      <a
+                        href={`tel:${selected.parentPhone.replace(/[\s-]/g, "")}`}
+                        className="font-medium text-primary hover:underline block"
+                      >
+                        {selected.parentName
+                          ? `${selected.parentName} (${selected.parentPhone})`
+                          : selected.parentPhone}
+                      </a>
+                    ) : (
+                      <p className="font-medium">{selected.parentName || "—"}</p>
+                    )}
                   </div>
                 </div>
                 <div>

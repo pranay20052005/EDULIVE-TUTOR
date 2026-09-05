@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { ClipboardList, Download, Lock, Upload } from "lucide-react";
+import { ClipboardList, Download, FileUp, Loader2, Lock, Upload, X } from "lucide-react";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toDDMMYYYY } from "@/lib/format";
 import { useStudentEnrollments } from "@/lib/db/hooks";
-import { assignmentService, assignmentSubmissionService } from "@/lib/db";
+import { assignmentService, assignmentSubmissionService, materialService } from "@/lib/db";
 import { useSession } from "@/lib/session";
 import type { Assignment } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
@@ -55,7 +55,7 @@ const tone: Record<UiStatus, string> = {
 };
 
 function AssignmentsPage() {
-  const { student } = useSession();
+  const { student, session } = useSession();
   const queryClient = useQueryClient();
   const { data: enrollments = [], isLoading: enrollmentsLoading } = useStudentEnrollments(
     student?.id,
@@ -91,40 +91,68 @@ function AssignmentsPage() {
   ];
 
   const [active, setActive] = useState<Assignment | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState("");
   const [note, setNote] = useState("");
-  const [errors, setErrors] = useState<{ fileName?: string }>({});
+  const [errors, setErrors] = useState<{ file?: string }>({});
   const [submitting, setSubmitting] = useState(false);
 
   const filters = ["all", "pending", "submitted", "overdue"] as const;
 
   const openSubmit = (a: Assignment) => {
     setActive(a);
+    setSelectedFile(null);
     setFileName("");
     setNote("");
     setErrors({});
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 50 * 1024 * 1024) {
+        setErrors({ file: "File size exceeds maximum 50MB limit." });
+        return;
+      }
+      setSelectedFile(file);
+      setFileName(file.name);
+      setErrors({});
+    }
+  };
+
   const submit = async () => {
-    if (!fileName.trim()) {
-      setErrors({ fileName: "Please enter the file name you are submitting." });
+    if (!selectedFile && !fileName.trim()) {
+      setErrors({ file: "Please select an assignment file to submit." });
       return;
     }
     if (!active || !student?.id) return;
     setSubmitting(true);
     try {
+      let finalFileUrl = fileName.trim();
+
+      // Upload real file to Supabase Storage if selected
+      if (selectedFile) {
+        const uploadRes = await materialService.uploadFile(
+          selectedFile,
+          session?.id || student?.userId,
+        );
+        finalFileUrl = uploadRes.url;
+      }
+
       await assignmentSubmissionService.submitAssignment({
         assignment_id: active.id,
         student_id: student.id,
         submission_text: note.trim() || undefined,
-        submission_url: fileName.trim(),
+        submission_url: finalFileUrl,
       });
+
       setLocalSubmittedIds((p) => [...p, active.id]);
       queryClient.invalidateQueries({ queryKey: ["student-submissions"] });
       queryClient.invalidateQueries({ queryKey: ["assignment-submissions"] });
-      toast.success(`Submitted "${fileName.trim()}" for ${active.title}`);
+      toast.success(`Submitted "${selectedFile?.name || fileName.trim()}" for ${active.title}!`);
       setActive(null);
     } catch (err: any) {
+      console.error("Assignment submit error:", err);
       toast.error(err.message || "Failed to submit assignment");
     } finally {
       setSubmitting(false);
@@ -250,7 +278,7 @@ function AssignmentsPage() {
       </Tabs>
 
       <Dialog open={!!active} onOpenChange={(open) => !open && setActive(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           {active ? (
             <>
               <DialogHeader>
@@ -258,22 +286,56 @@ function AssignmentsPage() {
               </DialogHeader>
               <div className="space-y-4">
                 <p className="text-xs text-muted-foreground">{active.description}</p>
+
+                {/* Real File Selection */}
                 <div className="space-y-1.5">
-                  <Label htmlFor="file-name">File name</Label>
-                  <Input
-                    id="file-name"
-                    value={fileName}
-                    onChange={(e) => {
-                      setFileName(e.target.value);
-                      if (errors.fileName) setErrors({});
-                    }}
-                    placeholder="e.g. my-homework.pdf"
-                    aria-invalid={!!errors.fileName}
-                  />
-                  {errors.fileName ? (
-                    <p className="text-xs text-destructive">{errors.fileName}</p>
-                  ) : null}
+                  <Label htmlFor="assignment-file">
+                    Upload Assignment File (PDF, DOCX, Images)
+                  </Label>
+                  {selectedFile ? (
+                    <div className="flex items-center justify-between rounded-xl border border-primary/30 bg-primary/5 p-3">
+                      <div className="min-w-0 pr-2">
+                        <p className="truncate text-xs font-medium text-foreground">
+                          {selectedFile.name}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {(selectedFile.size / 1024).toFixed(1)} KB
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                        onClick={() => {
+                          setSelectedFile(null);
+                          setFileName("");
+                        }}
+                      >
+                        <X className="size-3.5 mr-1" /> Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 text-center cursor-pointer hover:border-primary/50 transition-colors">
+                      <FileUp className="size-6 text-muted-foreground" />
+                      <span className="text-xs font-medium text-primary">
+                        Browse or drag files to upload
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        PDF, DOC, DOCX, PNG, JPG up to 50MB
+                      </span>
+                      <input
+                        id="assignment-file"
+                        type="file"
+                        className="sr-only"
+                        accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.txt"
+                        onChange={handleFileChange}
+                      />
+                    </label>
+                  )}
+                  {errors.file ? <p className="text-xs text-destructive">{errors.file}</p> : null}
                 </div>
+
                 <div className="space-y-1.5">
                   <Label htmlFor="note">Note to faculty (optional)</Label>
                   <Textarea
@@ -281,14 +343,23 @@ function AssignmentsPage() {
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                     placeholder="Any comments about your submission…"
+                    className="text-xs"
                   />
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="ghost" onClick={() => setActive(null)}>
+                <Button variant="ghost" onClick={() => setActive(null)} disabled={submitting}>
                   Cancel
                 </Button>
-                <Button onClick={submit}>Submit</Button>
+                <Button onClick={submit} disabled={submitting}>
+                  {submitting ? (
+                    <>
+                      <Loader2 className="size-3.5 mr-1.5 animate-spin" /> Uploading…
+                    </>
+                  ) : (
+                    "Submit Assignment"
+                  )}
+                </Button>
               </DialogFooter>
             </>
           ) : null}

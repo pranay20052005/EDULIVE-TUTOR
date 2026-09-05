@@ -14,9 +14,9 @@ export interface RazorpayConfig {
 }
 
 export function getRazorpayConfig(): RazorpayConfig {
-  const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || "";
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || "";
+  const keyId = (process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || "").trim();
+  const keySecret = (process.env.RAZORPAY_KEY_SECRET || "").trim();
+  const webhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || keySecret || "").trim();
 
   const isConfigured = Boolean(keyId && keySecret);
 
@@ -107,10 +107,21 @@ export function verifyRazorpaySignature(params: {
   const config = getRazorpayConfig();
 
   if (!config.isConfigured) {
-    // If external config is pending, allow signature verification if structured test token
-    if (params.signature.startsWith("sig_test_") || params.signature.length >= 16) {
+    // In production, signature verification MUST fail if gateway secret is not configured
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[SECURITY ALERT] Razorpay keys not configured in production. Rejecting verification.",
+      );
+      return false;
+    }
+    // Only in local development/test mode, accept test token format
+    if (params.signature.startsWith("sig_test_")) {
       return true;
     }
+    return false;
+  }
+
+  if (!params.signature || !params.orderId || !params.paymentId) {
     return false;
   }
 
@@ -120,10 +131,14 @@ export function verifyRazorpaySignature(params: {
     .update(body)
     .digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(expectedSignature, "utf-8"),
-    Buffer.from(params.signature, "utf-8"),
-  );
+  const expectedBuf = Buffer.from(expectedSignature, "utf-8");
+  const actualBuf = Buffer.from(params.signature, "utf-8");
+
+  if (expectedBuf.length !== actualBuf.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expectedBuf, actualBuf);
 }
 
 /**
@@ -131,7 +146,7 @@ export function verifyRazorpaySignature(params: {
  */
 export function verifyWebhookSignature(params: { rawBody: string; signature: string }): boolean {
   const config = getRazorpayConfig();
-  if (!config.webhookSecret) {
+  if (!config.webhookSecret || !params.signature || !params.rawBody) {
     return false;
   }
 
@@ -140,8 +155,12 @@ export function verifyWebhookSignature(params: { rawBody: string; signature: str
     .update(params.rawBody)
     .digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(expectedSignature, "utf-8"),
-    Buffer.from(params.signature, "utf-8"),
-  );
+  const expectedBuf = Buffer.from(expectedSignature, "utf-8");
+  const actualBuf = Buffer.from(params.signature, "utf-8");
+
+  if (expectedBuf.length !== actualBuf.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expectedBuf, actualBuf);
 }

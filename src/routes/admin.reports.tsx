@@ -85,15 +85,45 @@ function AdminReports() {
   }, [attendanceRecords]);
 
   const revenueTrend = useMemo(() => {
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"];
-    if (revenue === 0) {
-      return months.map((m) => ({ month: m, revenue: 0 }));
-    }
-    return months.map((m, i) => ({
-      month: m,
-      revenue: Math.round((revenue / 8) * (0.6 + i * 0.1)),
-    }));
-  }, [revenue]);
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const now = new Date();
+    const last6 = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+        month: monthNames[d.getMonth()]!,
+        revenue: 0,
+      };
+    });
+
+    const monthMap = new Map(last6.map((m) => [m.key, m]));
+
+    payments
+      .filter((p: Payment) => (p.status === "completed" || p.status === "paid") && p.created_at)
+      .forEach((p: Payment) => {
+        const d = new Date(p.created_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const target = monthMap.get(key);
+        if (target) {
+          target.revenue += Number(p.amount_inr) || 0;
+        }
+      });
+
+    return last6.map(({ month, revenue: r }) => ({ month, revenue: r }));
+  }, [payments]);
 
   const enrollmentsBySubject = useMemo(
     () =>
@@ -122,15 +152,56 @@ function AdminReports() {
   );
 
   const scoreTrend = useMemo(() => {
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
-    if (avgTestScore === 0) {
-      return months.map((m) => ({ month: m, score: 0 }));
-    }
-    return months.map((m, i) => ({
-      month: m,
-      score: Math.max(0, Math.min(100, Math.round(avgTestScore * (0.85 + i * 0.03)))),
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const now = new Date();
+    const last6 = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+        month: monthNames[d.getMonth()]!,
+        total: 0,
+        count: 0,
+      };
+    });
+
+    const monthMap = new Map(last6.map((m) => [m.key, m]));
+
+    testAttempts
+      .filter(
+        (a: TestAttempt) =>
+          (a.status === "graded" || a.status === "submitted") &&
+          typeof a.percentage === "number" &&
+          (a.submitted_at || a.created_at),
+      )
+      .forEach((a: TestAttempt) => {
+        const dateStr = a.submitted_at || a.created_at;
+        const d = new Date(dateStr);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const target = monthMap.get(key);
+        if (target) {
+          target.total += a.percentage || 0;
+          target.count += 1;
+        }
+      });
+
+    return last6.map(({ month, total, count }) => ({
+      month,
+      score: count > 0 ? Math.round(total / count) : 0,
     }));
-  }, [avgTestScore]);
+  }, [testAttempts]);
 
   return (
     <div className="space-y-8">

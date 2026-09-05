@@ -1,7 +1,12 @@
-import "./lib/error-capture";
+import "./lib/error-capture.ts";
 
-import { consumeLastCapturedError } from "./lib/error-capture";
-import { renderErrorPage } from "./lib/error-page";
+import { consumeLastCapturedError } from "./lib/error-capture.ts";
+import { renderErrorPage } from "./lib/error-page.ts";
+import { verifyWebhookSignature } from "./lib/server/razorpay.ts";
+import {
+  getServerSupabase,
+  handleRazorpayWebhookInternal,
+} from "./lib/server/payment-functions.ts";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -16,6 +21,106 @@ async function getServerEntry(): Promise<ServerEntry> {
     );
   }
   return serverEntryPromise;
+}
+
+/**
+ * Native HTTP handler for Razorpay Webhooks: POST /api/webhooks/razorpay
+ * Receives the untouched raw request body for accurate HMAC SHA256 timing-safe verification.
+ */
+async function handleRazorpayWebhookHttpRequest(request: Request): Promise<Response> {
+  if (request.method === "GET" || request.method === "HEAD") {
+    return new Response(
+      JSON.stringify({
+        status: "active",
+        endpoint: "/api/webhooks/razorpay",
+        service: "EduLive Razorpay Webhook Gateway",
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      },
+    );
+  }
+
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed. Use POST." }), {
+      status: 405,
+      headers: {
+        "content-type": "application/json",
+        allow: "POST, GET, HEAD",
+      },
+    });
+  }
+
+  const signature = request.headers.get("x-razorpay-signature") || "";
+  if (!signature) {
+    return new Response(JSON.stringify({ error: "Missing x-razorpay-signature header." }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  let rawBody: string;
+  try {
+    rawBody = await request.text();
+  } catch (err: any) {
+    return new Response(
+      JSON.stringify({ error: `Failed to read request body: ${err?.message || "Unknown error"}` }),
+      {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      },
+    );
+  }
+
+  if (!rawBody || !rawBody.trim()) {
+    return new Response(JSON.stringify({ error: "Empty webhook payload." }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // Fast cryptographic timing-safe signature verification before DB access
+  const isValidSignature = verifyWebhookSignature({ rawBody, signature });
+  if (!isValidSignature) {
+    return new Response(JSON.stringify({ error: "Invalid Razorpay webhook signature." }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  try {
+    const supabase = getServerSupabase();
+    const result = await handleRazorpayWebhookInternal(supabase, {
+      rawBody,
+      signature,
+    });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        ...result,
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      },
+    );
+  } catch (err: any) {
+    const errorMessage = err?.message || "Webhook processing failed.";
+    const isClientError = /invalid|missing|malformed|mismatch|not found|unauthorized/i.test(
+      errorMessage,
+    );
+    return new Response(
+      JSON.stringify({
+        error: errorMessage,
+      }),
+      {
+        status: isClientError ? 400 : 500,
+        headers: { "content-type": "application/json" },
+      },
+    );
+  }
 }
 
 // h3 swallows in-handler throws into a normal 500 Response with body
@@ -47,6 +152,12 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const url = new URL(request.url);
+      const pathname = url.pathname.replace(/\/+$/, "");
+      if (pathname === "/api/webhooks/razorpay") {
+        return await handleRazorpayWebhookHttpRequest(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

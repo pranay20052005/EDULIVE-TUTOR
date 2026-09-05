@@ -1,11 +1,10 @@
-import { Pin, PinOff, Send, Trash2, Users } from "lucide-react";
+import { Pin, PinOff, Send, Trash2 } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { initials, timeOf } from "@/lib/format";
+import { timeOf } from "@/lib/format";
 import { supabase } from "@/lib/db/client";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +30,7 @@ export function LiveChat({ classId, userId, userName, userRole }: LiveChatProps)
   const [draft, setDraft] = useState("");
   const [pinnedMessage, setPinnedMessage] = useState<ChatMessage | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const channelRef = useRef<any>(null);
 
   const isTeacher = userRole === "teacher" || userRole === "admin";
 
@@ -38,12 +38,13 @@ export function LiveChat({ classId, userId, userName, userRole }: LiveChatProps)
     if (!classId) return;
 
     const channel = supabase.channel(`classroom:${classId}:chat`);
+    channelRef.current = channel;
 
     channel
-      .on("broadcast", { event: "new_message" }, ({ payload }) => {
+      .on("broadcast", { event: "new_message" }, ({ payload }: { payload: any }) => {
         setMessages((prev) => [...prev, payload]);
       })
-      .on("broadcast", { event: "pin_message" }, ({ payload }) => {
+      .on("broadcast", { event: "pin_message" }, ({ payload }: { payload: any }) => {
         setPinnedMessage(payload);
         if (payload) {
           toast.info(`Pinned by Faculty: "${payload.text.substring(0, 40)}..."`);
@@ -58,6 +59,7 @@ export function LiveChat({ classId, userId, userName, userRole }: LiveChatProps)
 
     return () => {
       supabase.removeChannel(channel);
+      channelRef.current = null;
     };
   }, [classId]);
 
@@ -84,12 +86,13 @@ export function LiveChat({ classId, userId, userName, userRole }: LiveChatProps)
     setMessages((prev) => [...prev, msg]);
     setDraft("");
 
-    const channel = supabase.channel(`classroom:${classId}:chat`);
-    channel.send({
-      type: "broadcast",
-      event: "new_message",
-      payload: msg,
-    });
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "new_message",
+        payload: msg,
+      });
+    }
   };
 
   const togglePin = (msg: ChatMessage) => {
@@ -97,12 +100,13 @@ export function LiveChat({ classId, userId, userName, userRole }: LiveChatProps)
     const nextPin = pinnedMessage?.id === msg.id ? null : msg;
     setPinnedMessage(nextPin);
 
-    const channel = supabase.channel(`classroom:${classId}:chat`);
-    channel.send({
-      type: "broadcast",
-      event: "pin_message",
-      payload: nextPin,
-    });
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "pin_message",
+        payload: nextPin,
+      });
+    }
   };
 
   const clearChat = () => {
@@ -110,12 +114,13 @@ export function LiveChat({ classId, userId, userName, userRole }: LiveChatProps)
     setMessages([]);
     setPinnedMessage(null);
 
-    const channel = supabase.channel(`classroom:${classId}:chat`);
-    channel.send({
-      type: "broadcast",
-      event: "clear_chat",
-      payload: {},
-    });
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "clear_chat",
+        payload: {},
+      });
+    }
     toast.success("Classroom chat cleared");
   };
 

@@ -124,11 +124,14 @@ function CheckoutPage() {
         throw new Error("Student profile not found. Please log in again.");
       }
 
+      const authToken = authSession?.access_token;
+
       // 2. Server-side order creation (validates price in DB to prevent price tampering)
       const order = await createPaymentOrderFn({
         data: {
           subjectId,
           studentId: lookupId,
+          authToken,
         },
       });
 
@@ -138,6 +141,7 @@ function CheckoutPage() {
           data: {
             subjectId,
             studentId: lookupId,
+            authToken,
           },
         });
         enroll(subjectId);
@@ -181,6 +185,7 @@ function CheckoutPage() {
                   subjectId,
                   studentId: lookupId,
                   paymentMethod: method.toLowerCase(),
+                  authToken,
                 },
               });
 
@@ -224,7 +229,20 @@ function CheckoutPage() {
         });
         rzp.open();
       } else {
-        // Development / Test Mode simulated payment verification
+        // Only permit simulated test payment in non-production environments
+        if (
+          typeof window !== "undefined" &&
+          window.location.hostname !== "localhost" &&
+          window.location.hostname !== "127.0.0.1"
+        ) {
+          setPaying(false);
+          toast.error(
+            "Payment gateway is temporarily unconfigured for production. Please contact institute support.",
+          );
+          return;
+        }
+
+        // Development Sandbox simulated verification
         const simulatedPaymentId = `pay_sim_${Date.now()}`;
         const simulatedSignature = `sig_test_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -236,6 +254,7 @@ function CheckoutPage() {
             subjectId,
             studentId: lookupId,
             paymentMethod: method.toLowerCase(),
+            authToken,
           },
         });
 
@@ -248,7 +267,7 @@ function CheckoutPage() {
           await queryClient.invalidateQueries({ queryKey: ["subjects"] });
           await queryClient.refetchQueries({ queryKey: ["enrollments"] });
           setPaying(false);
-          toast.success(`Payment confirmed! ${subject.name} added to My Subjects`);
+          toast.success(`[Test Mode] Enrollment activated for ${subject.name}`);
           navigate({ to: "/app/subjects/$subjectId", params: { subjectId } });
         }
       }

@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 
 import { PageHeader, SectionTitle } from "@/components/ui-kit";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { settingsService, defaultSettings, type InstituteSettings } from "@/lib/db";
 
 export const Route = createFileRoute("/admin/settings")({
   head: () => ({
@@ -32,7 +35,7 @@ export const Route = createFileRoute("/admin/settings")({
 });
 
 const TIMEZONES = ["Asia/Kolkata", "Asia/Dubai", "Asia/Karachi", "Asia/Dhaka"];
-const ACADEMIC_YEARS = ["2023-24", "2024-25", "2025-26"];
+const ACADEMIC_YEARS = ["2023-24", "2024-25", "2025-26", "2026-27"];
 
 const permissions = [
   {
@@ -50,20 +53,21 @@ const permissions = [
 ];
 
 function AdminSettings() {
-  const [form, setForm] = useState({
-    instituteName: "EduLive Learning Pvt. Ltd.",
-    contactEmail: "support@edulive.in",
-    contactPhone: "+91 80000 12345",
-    academicYear: ACADEMIC_YEARS[1]!,
-    timezone: TIMEZONES[0]!,
+  const queryClient = useQueryClient();
+  const { data: dbSettings, isLoading } = useQuery({
+    queryKey: ["admin-settings"],
+    queryFn: () => settingsService.getAll(),
   });
+
+  const [form, setForm] = useState<InstituteSettings>(defaultSettings);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [toggles, setToggles] = useState({
-    paymentAlerts: true,
-    lowAttendance: true,
-    newEnrollments: true,
-    marketing: false,
-  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (dbSettings) {
+      setForm(dbSettings);
+    }
+  }, [dbSettings]);
 
   const validate = () => {
     const next: Record<string, string> = {};
@@ -76,12 +80,35 @@ function AdminSettings() {
     return Object.keys(next).length === 0;
   };
 
-  const save = () => {
+  const save = async () => {
     if (!validate()) {
       toast.error("Please fix the highlighted fields");
       return;
     }
-    toast.success("Settings saved");
+
+    setSaving(true);
+    try {
+      await settingsService.save(form);
+      await queryClient.invalidateQueries({ queryKey: ["admin-settings"] });
+      toast.success("Institute settings saved successfully!");
+    } catch (err: any) {
+      console.error("Save settings error:", err);
+      toast.error(err.message || "Failed to save settings to database");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateToggle = async (key: keyof InstituteSettings, value: boolean) => {
+    const nextForm = { ...form, [key]: value };
+    setForm(nextForm);
+    try {
+      await settingsService.save({ [key]: value });
+      await queryClient.invalidateQueries({ queryKey: ["admin-settings"] });
+      toast.success("Notification preference saved");
+    } catch (err: any) {
+      toast.error("Failed to update preference: " + err.message);
+    }
   };
 
   return (
@@ -99,6 +126,7 @@ function AdminSettings() {
             <Input
               value={form.instituteName}
               onChange={(e) => setForm((p) => ({ ...p, instituteName: e.target.value }))}
+              placeholder="e.g. EduLive Learning Academy"
             />
             {errors["instituteName"] ? (
               <p className="text-xs text-destructive">{errors["instituteName"]}</p>
@@ -109,6 +137,7 @@ function AdminSettings() {
             <Input
               value={form.contactEmail}
               onChange={(e) => setForm((p) => ({ ...p, contactEmail: e.target.value }))}
+              placeholder="support@edulive.in"
             />
             {errors["contactEmail"] ? (
               <p className="text-xs text-destructive">{errors["contactEmail"]}</p>
@@ -119,6 +148,7 @@ function AdminSettings() {
             <Input
               value={form.contactPhone}
               onChange={(e) => setForm((p) => ({ ...p, contactPhone: e.target.value }))}
+              placeholder="+91 98765 43210"
             />
             {errors["contactPhone"] ? (
               <p className="text-xs text-destructive">{errors["contactPhone"]}</p>
@@ -161,8 +191,14 @@ function AdminSettings() {
             </Select>
           </div>
         </div>
-        <Button className="mt-5" onClick={save}>
-          Save settings
+        <Button className="mt-5" onClick={save} disabled={saving}>
+          {saving ? (
+            <>
+              <Loader2 className="size-3.5 mr-1.5 animate-spin" /> Saving…
+            </>
+          ) : (
+            "Save settings"
+          )}
         </Button>
       </section>
 
@@ -182,13 +218,7 @@ function AdminSettings() {
                 <p className="text-sm font-medium">{title}</p>
                 <p className="text-xs text-muted-foreground">{body}</p>
               </div>
-              <Switch
-                checked={toggles[key]}
-                onCheckedChange={(v) => {
-                  setToggles((p) => ({ ...p, [key]: v }));
-                  toast.success("Notification preference saved");
-                }}
-              />
+              <Switch checked={Boolean(form[key])} onCheckedChange={(v) => updateToggle(key, v)} />
             </div>
           ))}
         </div>

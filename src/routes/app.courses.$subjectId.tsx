@@ -18,18 +18,23 @@ import { useSession } from "@/lib/session";
 import type { Chapter, ScheduledClass } from "@/lib/db/types";
 
 export const Route = createFileRoute("/app/courses/$subjectId")({
-  head: () => ({
-    meta: [
-      { title: "Course — EduLive" },
-      {
-        name: "description",
-        content:
-          "Course details: syllabus, live classes, recordings, notes, mock tests, validity and price.",
-      },
-      { property: "og:title", content: "Course" },
-      { property: "og:description", content: "Everything included in this EduLive course." },
-    ],
-  }),
+  head: ({ params }) => {
+    const title = "Course Details — EduLive";
+    return {
+      meta: [
+        { title },
+        {
+          name: "description",
+          content: `Course details, syllabus, faculty live classes, notes, and mock tests on EduLive for subject ID ${params.subjectId}.`,
+        },
+        { property: "og:title", content: title },
+        {
+          property: "og:description",
+          content: "Explore live classes, chapter-wise syllabus, and notes on EduLive.",
+        },
+      ],
+    };
+  },
   component: CourseDetail,
 });
 
