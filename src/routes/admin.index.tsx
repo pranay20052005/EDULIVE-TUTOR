@@ -82,15 +82,44 @@ function AdminHome() {
   }, [attendanceRecords]);
 
   const revenueTrend = useMemo(() => {
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"];
-    if (revenue === 0) {
-      return months.map((m) => ({ month: m, amount: 0 }));
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const past6Months = Array.from({ length: 6 }, (_, idx) => {
+      const d = new Date(currentYear, currentMonth - 5 + idx, 1);
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+        label: monthNames[d.getMonth()],
+        revenue: 0,
+      };
+    });
+
+    const monthMap = new Map(past6Months.map((m) => [m.key, m]));
+    for (const p of payments) {
+      if ((p?.status === "completed" || p?.status === "paid") && p?.created_at) {
+        const createdKey = p.created_at.slice(0, 7);
+        const item = monthMap.get(createdKey);
+        if (item) {
+          item.revenue += p.amount_inr || 0;
+        }
+      }
     }
-    return months.map((m, i) => ({
-      month: m,
-      amount: Math.round((revenue / 8) * (0.6 + i * 0.1)),
-    }));
-  }, [revenue]);
+    return past6Months.map((m) => ({ month: m.label, amount: m.revenue }));
+  }, [payments]);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const classesToday = classes.filter(

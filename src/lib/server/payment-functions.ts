@@ -268,7 +268,6 @@ export interface CreateOrderResponse {
   keyId: string;
   isFree: boolean;
   subjectName: string;
-  isPendingConfig?: boolean;
 }
 
 /**
@@ -374,10 +373,9 @@ export async function createPaymentOrderInternal(
     amountInr: totalAmountInr,
     amountInPaise,
     currency: "INR",
-    keyId: rzpConfig.keyId || "rzp_test_placeholder",
+    keyId: rzpConfig.keyId,
     isFree: false,
     subjectName: subject.name,
-    isPendingConfig: rzpOrder.isPendingConfig,
   };
 }
 

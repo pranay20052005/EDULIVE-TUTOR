@@ -41,7 +41,6 @@ export interface RazorpayOrderResult {
   currency: string;
   receipt: string;
   status: string;
-  isPendingConfig?: boolean;
 }
 
 /**
@@ -51,16 +50,9 @@ export async function createRazorpayOrder(params: CreateOrderParams): Promise<Ra
   const config = getRazorpayConfig();
 
   if (!config.isConfigured) {
-    // Return structured pending/test descriptor when credentials are not yet supplied in env
-    const mockOrderId = `order_test_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    return {
-      id: mockOrderId,
-      amount: params.amountInPaise,
-      currency: params.currency || "INR",
-      receipt: params.receipt,
-      status: "created",
-      isPendingConfig: true,
-    };
+    throw new Error(
+      "Razorpay payment gateway is not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.",
+    );
   }
 
   const authHeader = `Basic ${Buffer.from(`${config.keyId}:${config.keySecret}`).toString("base64")}`;
@@ -92,7 +84,6 @@ export async function createRazorpayOrder(params: CreateOrderParams): Promise<Ra
     currency: orderData.currency,
     receipt: orderData.receipt,
     status: orderData.status,
-    isPendingConfig: false,
   };
 }
 
@@ -106,22 +97,13 @@ export function verifyRazorpaySignature(params: {
 }): boolean {
   const config = getRazorpayConfig();
 
-  if (!config.isConfigured) {
-    // In production, signature verification MUST fail if gateway secret is not configured
-    if (process.env.NODE_ENV === "production") {
-      console.error(
-        "[SECURITY ALERT] Razorpay keys not configured in production. Rejecting verification.",
-      );
-      return false;
-    }
-    // Only in local development/test mode, accept test token format
-    if (params.signature.startsWith("sig_test_")) {
-      return true;
-    }
-    return false;
-  }
-
-  if (!params.signature || !params.orderId || !params.paymentId) {
+  if (
+    !config.isConfigured ||
+    !config.keySecret ||
+    !params.signature ||
+    !params.orderId ||
+    !params.paymentId
+  ) {
     return false;
   }
 

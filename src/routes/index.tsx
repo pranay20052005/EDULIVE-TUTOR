@@ -153,7 +153,7 @@ function Landing() {
               <Link to="/register">Start enrolling</Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link to="/login">View demo dashboard</Link>
+              <Link to="/login">Sign in to dashboard</Link>
             </Button>
           </div>
           <dl className="mt-10 grid grid-cols-3 gap-4 border-t border-border pt-6">

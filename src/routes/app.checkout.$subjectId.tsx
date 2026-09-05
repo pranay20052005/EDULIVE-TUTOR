@@ -158,119 +158,76 @@ function CheckoutPage() {
       }
 
       // 3. Paid course gateway flow
-      const hasRealGateway =
-        scriptLoaded &&
-        (window as any).Razorpay &&
-        order.keyId &&
-        !order.keyId.includes("placeholder") &&
-        !order.isPendingConfig;
-
-      if (hasRealGateway) {
-        // Open live/test Razorpay modal
-        const options = {
-          key: order.keyId,
-          amount: order.amountInPaise,
-          currency: order.currency,
-          name: "EduLive",
-          description: `Enrollment in ${order.subjectName}`,
-          order_id: order.orderId,
-          handler: async function (response: any) {
-            try {
-              // Cryptographic server-side verification
-              const verifyRes = await verifyPaymentFn({
-                data: {
-                  orderId: response.razorpay_order_id || order.orderId,
-                  paymentId: response.razorpay_payment_id,
-                  signature: response.razorpay_signature,
-                  subjectId,
-                  studentId: lookupId,
-                  paymentMethod: method.toLowerCase(),
-                  authToken,
-                },
-              });
-
-              if (verifyRes.success) {
-                enroll(subjectId);
-                await queryClient.invalidateQueries({ queryKey: ["enrollments"] });
-                await queryClient.invalidateQueries({ queryKey: ["student-enrollments"] });
-                await queryClient.invalidateQueries({ queryKey: ["student-payments"] });
-                await queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
-                await queryClient.invalidateQueries({ queryKey: ["subjects"] });
-                await queryClient.refetchQueries({ queryKey: ["enrollments"] });
-                setPaying(false);
-                toast.success(`Payment verified! ${subject.name} activated.`);
-                navigate({ to: "/app/subjects/$subjectId", params: { subjectId } });
-              }
-            } catch (vErr: any) {
-              setPaying(false);
-              toast.error(vErr.message || "Payment verification failed.");
-            }
-          },
-          modal: {
-            ondismiss: function () {
-              setPaying(false);
-              toast.info("Payment cancelled. You can try again whenever ready.");
-            },
-          },
-          prefill: {
-            name: student?.name || "",
-            email: student?.email || "",
-            contact: student?.phone || "",
-          },
-          theme: {
-            color: "#6366f1",
-          },
-        };
-
-        const rzp = new (window as any).Razorpay(options);
-        rzp.on("payment.failed", function (failRes: any) {
-          setPaying(false);
-          toast.error(failRes.error?.description || "Payment failed at gateway.");
-        });
-        rzp.open();
-      } else {
-        // Only permit simulated test payment in non-production environments
-        if (
-          typeof window !== "undefined" &&
-          window.location.hostname !== "localhost" &&
-          window.location.hostname !== "127.0.0.1"
-        ) {
-          setPaying(false);
-          toast.error(
-            "Payment gateway is temporarily unconfigured for production. Please contact institute support.",
-          );
-          return;
-        }
-
-        // Development Sandbox simulated verification
-        const simulatedPaymentId = `pay_sim_${Date.now()}`;
-        const simulatedSignature = `sig_test_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
-        const verifyRes = await verifyPaymentFn({
-          data: {
-            orderId: order.orderId,
-            paymentId: simulatedPaymentId,
-            signature: simulatedSignature,
-            subjectId,
-            studentId: lookupId,
-            paymentMethod: method.toLowerCase(),
-            authToken,
-          },
-        });
-
-        if (verifyRes.success) {
-          enroll(subjectId);
-          await queryClient.invalidateQueries({ queryKey: ["enrollments"] });
-          await queryClient.invalidateQueries({ queryKey: ["student-enrollments"] });
-          await queryClient.invalidateQueries({ queryKey: ["student-payments"] });
-          await queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
-          await queryClient.invalidateQueries({ queryKey: ["subjects"] });
-          await queryClient.refetchQueries({ queryKey: ["enrollments"] });
-          setPaying(false);
-          toast.success(`[Test Mode] Enrollment activated for ${subject.name}`);
-          navigate({ to: "/app/subjects/$subjectId", params: { subjectId } });
-        }
+      if (!scriptLoaded || !(window as any).Razorpay || !order.keyId) {
+        setPaying(false);
+        toast.error(
+          "Razorpay payment gateway is not available. Please check your internet connection and verify gateway configuration.",
+        );
+        return;
       }
+
+      // Open live/test Razorpay modal
+      const options = {
+        key: order.keyId,
+        amount: order.amountInPaise,
+        currency: order.currency,
+        name: "EduLive",
+        description: `Enrollment in ${order.subjectName}`,
+        order_id: order.orderId,
+        handler: async function (response: any) {
+          try {
+            // Cryptographic server-side verification
+            const verifyRes = await verifyPaymentFn({
+              data: {
+                orderId: response.razorpay_order_id || order.orderId,
+                paymentId: response.razorpay_payment_id,
+                signature: response.razorpay_signature,
+                subjectId,
+                studentId: lookupId,
+                paymentMethod: method.toLowerCase(),
+                authToken,
+              },
+            });
+
+            if (verifyRes.success) {
+              enroll(subjectId);
+              await queryClient.invalidateQueries({ queryKey: ["enrollments"] });
+              await queryClient.invalidateQueries({ queryKey: ["student-enrollments"] });
+              await queryClient.invalidateQueries({ queryKey: ["student-payments"] });
+              await queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
+              await queryClient.invalidateQueries({ queryKey: ["subjects"] });
+              await queryClient.refetchQueries({ queryKey: ["enrollments"] });
+              setPaying(false);
+              toast.success(`Payment verified! ${subject.name} activated.`);
+              navigate({ to: "/app/subjects/$subjectId", params: { subjectId } });
+            }
+          } catch (vErr: any) {
+            setPaying(false);
+            toast.error(vErr.message || "Payment verification failed.");
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setPaying(false);
+            toast.info("Payment cancelled. You can try again whenever ready.");
+          },
+        },
+        prefill: {
+          name: student?.name || "",
+          email: student?.email || "",
+          contact: student?.phone || "",
+        },
+        theme: {
+          color: "#6366f1",
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on("payment.failed", function (failRes: any) {
+        setPaying(false);
+        toast.error(failRes.error?.description || "Payment failed at gateway.");
+      });
+      rzp.open();
     } catch (err: any) {
       console.error("Payment error:", err);
       setPaying(false);

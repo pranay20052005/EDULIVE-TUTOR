@@ -51,7 +51,6 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
 # Keep these as-is
 VITE_ENVIRONMENT=development
 VITE_APP_URL=http://localhost:5173
-VITE_MOCK_DATA_ENABLED=true
 VITE_REALTIME_ENABLED=true
 ```
 

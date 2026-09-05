@@ -252,7 +252,6 @@ VITE_ENVIRONMENT=development
 VITE_APP_URL=http://localhost:5173
 
 # Features
-VITE_MOCK_DATA_ENABLED=true
 VITE_REALTIME_ENABLED=true
 ```
 

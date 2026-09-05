@@ -301,7 +301,6 @@ VITE_APP_URL=http://localhost:5173
 VITE_API_URL=http://localhost:5173/api
 
 # Features
-VITE_MOCK_DATA_ENABLED=true
 VITE_REALTIME_ENABLED=true
 VITE_STORAGE_ENABLED=true
 ```
